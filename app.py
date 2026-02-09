@@ -10,6 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import traceback
 import warnings
+from bs4 import BeautifulSoup
 
 warnings.filterwarnings("ignore")
 
@@ -52,6 +53,61 @@ def wikipedia_search(search_term: str) -> dict:
         "extract": extract,
         "url": page_url
     }
+
+def virushostdb_search(search_term: str) -> dict:
+    """Search VirusHostDB and return host information"""
+    try:
+        search_url = f"https://www.genome.jp/virushostdb/view/?mode=view&search_text={requests.utils.quote(search_term)}"
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        
+        r = requests.get(search_url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return {"success": False, "message": f"Failed to access VirusHostDB for {search_term}"}
+        
+        soup = BeautifulSoup(r.content, 'html.parser')
+        
+        # Extract main content area (avoid headers/footers)
+        main_content = soup.find('div', id='main') or soup.find('div', class_='content') or soup
+        
+        # Get text but clean it
+        page_text = main_content.get_text(separator='\n', strip=True)
+        
+        # Check if there are results
+        if "No data" in page_text or "not found" in page_text.lower() or len(page_text) < 50:
+            return {"success": False, "message": f"No host data found for {search_term}"}
+        
+        # Extract structured data (table rows are most reliable)
+        host_data = []
+        for tr in main_content.find_all('tr'):
+            cells = [td.get_text(strip=True) for td in tr.find_all(['td', 'th'])]
+            if len(cells) >= 2:  # Only keep rows with at least 2 columns
+                host_data.append(' | '.join(cells))
+        
+        # Format results
+        if host_data:
+            formatted_results = '\n'.join(host_data)
+        else:
+            # Fallback: clean text extraction
+            lines = page_text.split('\n')
+            filtered_lines = [
+                line for line in lines 
+                if line and len(line) > 10 and 
+                not any(skip in line for skip in ['Home', 'Search', 'Copyright', 'Download', 'Help', 'About'])
+            ]
+            formatted_results = '\n'.join(filtered_lines[:20])
+        
+        return {
+            "success": True,
+            "search_term": search_term,
+            "results": formatted_results,
+            "url": search_url
+        }
+        
+    except Exception as e:
+        return {"success": False, "message": f"Error searching VirusHostDB: {str(e)}"}
 
 def query_dataframe(code: str, df: pd.DataFrame) -> dict:
     try:
@@ -126,6 +182,23 @@ TOOLS_SPEC = [
     {
         "type": "function",
         "function": {
+            "name": "virushostdb_search",
+            "description": "Search the VirusHostDB database to get host organism information for a virus. Returns a table with virus-host relationships.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "search_term": {
+                        "type": "string",
+                        "description": "Virus name to search for host information (e.g., 'orthopoxvirus', 'influenza')"
+                    }
+                },
+                "required": ["search_term"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "query_dataframe",
             "description": "Execute pandas code on df and RETURN a pandas DataFrame. The variable 'result' MUST be a pandas DataFrame. This DataFrame will automatically be stored as 'last_result' for subsequent tools.",
             "parameters": {
@@ -168,29 +241,25 @@ def ollama_agent_loop(model: str, user_query: str, df: pd.DataFrame):
             "content": """You are a scientific bioinformatics assistant specialized in virus.
 
 You work with:
-• A pandas DataFrame called `df` containing viral taxonomy data collumns : ORGANISM_NAME,TAX_ID,PARENT_TAX_ID,RANK,SPECIES_NAME,GENUS_NAME,FAMILY_NAME,ORDER_NAME,CLASS_NAME,PHYLUM_NAME,KINGDOM_NAME,SUPERKINGDOM_NAME,HAS_GENOME_ASSEMBLY,NUM_GENOME_ASSEMBLIES,MAX_GENOME_SIZE,HAS_STAT_KMER,NUM_STAT_KMER,HAS_STAT,NUM_POSITIVE_STAT_SAMPLE,SUM_STAT_TOTAL_COUNT,HAS_STAT_ECO,NUM_POSITIVE_STAT_SAMPLE_ECO,SUM_STAT_TOTAL_COUNT_ECO,HAS_GBIF,NUM_GBIF_OBSERVATIONS,NUM_SRA_SAMPLES,NUM_GSA_SAMPLES,NUM_COLLECTION_DATE,FIRST_COLLECTION_DATE,LAST_COLLECTION_DATE,NUM_LATLON
-• Trusted public biological sources (e.g. Wikipedia) accessed ONLY via tools
+- A pandas DataFrame called `df` containing viral taxonomy data with columns: ORGANISM_NAME,TAX_ID,PARENT_TAX_ID,RANK,SPECIES_NAME,GENUS_NAME,FAMILY_NAME,ORDER_NAME,CLASS_NAME,PHYLUM_NAME,KINGDOM_NAME,SUPERKINGDOM_NAME,HAS_GENOME_ASSEMBLY,NUM_GENOME_ASSEMBLIES,MAX_GENOME_SIZE,HAS_STAT_KMER,NUM_STAT_KMER,HAS_STAT,NUM_POSITIVE_STAT_SAMPLE,SUM_STAT_TOTAL_COUNT,HAS_STAT_ECO,NUM_POSITIVE_STAT_SAMPLE_ECO,SUM_STAT_TOTAL_COUNT_ECO,HAS_GBIF,NUM_GBIF_OBSERVATIONS,NUM_SRA_SAMPLES,NUM_GSA_SAMPLES,NUM_COLLECTION_DATE,FIRST_COLLECTION_DATE,LAST_COLLECTION_DATE,NUM_LATLON
+- Trusted public biological sources (e.g. Wikipedia, VirusHostDB) accessed ONLY via tools
 
 STRICT RULES:
-- Do NOT invent facts, species, families, counts, or biological claims.
+- Do NOT show dataset structure or column names in your responses
+- Do NOT invent facts, species, families, counts, or biological claims
 - If information is not present in the dataset or retrieved from a tool, explicitly say:
    "This information is not available in the current dataset or sources."
-- Do not shown Dataset structure 
 - Every biological or taxonomic statement must be grounded in:
    - the dataset (df / last_result), or
-   - an external tool response (e.g. Wikipedia) 
+   - an external tool response (e.g. Wikipedia, VirusHostDB)
 - Use tools if needed
-
-DATASET AWARENESS:
-- At the beginning of the FIRST response in a conversation, briefly describe
-  the dataset structure using df.columns.
-- Column descriptions must be inferred conservatively from column names only.
-- Do NOT guess biological meaning beyond column names.
+- Report information EXACTLY as returned by tools without interpretation
 
 STYLE:
 - Scientific, concise, neutral
 - No speculation
 - No storytelling
+- Start directly with the answer, no preamble about dataset structure
 """
         },
         {"role": "user", "content": user_query}
@@ -198,6 +267,7 @@ STYLE:
 
     used_sources = set()
     used_wikipedia_urls = []
+    used_virushostdb_urls = []
     executed_codes = []
 
     print("="*100)
@@ -251,7 +321,31 @@ STYLE:
                                 f"🔗 **Source Wikipedia** : {output['url']}"
                             )
                         })
-                        print( "WIKIIIII", output)
+                        print("WIKIIIII", output)
+                    else:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": call["id"],
+                            "name": name,
+                            "content": output["message"]
+                        })
+
+                elif name == "virushostdb_search":
+                    output = virushostdb_search(**args)
+                    if output["success"]:
+                        used_sources.add("VirusHostDB")
+                        used_virushostdb_urls.append(output["url"])
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": call["id"],
+                            "name": name,
+                            "content": (
+                                f"**VirusHostDB Results for '{output['search_term']}'**\n\n"
+                                f"{output['results']}\n\n"
+                                f"🔗 **Source**: {output['url']}"
+                            )
+                        })
+                        print("VIRUSHOSTDB", output)
                     else:
                         messages.append({
                             "role": "tool",
@@ -308,7 +402,7 @@ STYLE:
         else:
             messages.append(msg)
             print("Content:", msg["content"])
-            return msg["content"], messages, generated_figures, used_sources, used_wikipedia_urls, executed_codes
+            return msg["content"], messages, generated_figures, used_sources, used_wikipedia_urls, used_virushostdb_urls, executed_codes
 
 # ==================== DATA LOADING ==================== #
 
@@ -344,11 +438,13 @@ def main():
 
         Example questions:
             
-        • "Summarize Orthopoxvirus (family, genus, species count)"
-        • "List virus families with more than 100 recorded species"
-        • "How many genera are in Retroviridae?"
-        • "Show a pie chart of genus distribution in Poxviridae"
-        • "Compare species counts between Orthomyxoviridae and Coronaviridae"
+        
+        -  "Summarize Orthopoxvirus (family, genus, species count)"
+        - "List virus families with more than 100 recorded species"
+        - "How many genera are in Retroviridae?"
+        - "Show a pie chart of genus distribution in Poxviridae"
+        - "Compare species counts between Orthomyxoviridae and Coronaviridae"
+        - "Give me hosts of Orthopoxvirus Abatino"
         
     """)
 
@@ -397,7 +493,7 @@ def main():
             st.markdown(msg["content"])
 
     for fig in st.session_state.figures:
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True)
 
     query = st.chat_input("Ask about viruses...")
 
@@ -409,7 +505,7 @@ def main():
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                answer, messages_history, new_figures, used_sources, used_wikipedia_urls, executed_codes = ollama_agent_loop(model, query, df)
+                answer, messages_history, new_figures, used_sources, used_wikipedia_urls, used_virushostdb_urls, executed_codes = ollama_agent_loop(model, query, df)
 
                 st.markdown(answer)
 
@@ -419,8 +515,12 @@ def main():
                     if used_wikipedia_urls:
                         wiki_str = ", ".join(
                             f"[{url.split('/')[-1].replace('_', ' ')}]({url})"
-                            for url in used_wikipedia_urls  )
+                            for url in used_wikipedia_urls)
                         st.markdown(f"**📘 Wikipedia**: {wiki_str}")
+
+                    if used_virushostdb_urls:
+                        vhdb_str = ", ".join(f"[Search]({url})" for url in used_virushostdb_urls)
+                        st.markdown(f"**🦠 VirusHostDB**: {vhdb_str}")
 
                     # Section Dataset Query
                     if executed_codes:
@@ -432,9 +532,10 @@ def main():
                             )
                             st.code(full_code, language="python")
 
-                    for fig in new_figures:
-                        st.plotly_chart(fig, width='stretch')
-                        st.session_state.figures.append(fig)
+            # CORRECTION: Déplacer l'affichage des figures EN DEHORS du bloc "if used_sources"
+            for fig in new_figures:
+                st.plotly_chart(fig, use_container_width=True)
+                st.session_state.figures.append(fig)
 
         st.session_state.messages.append({
             "role": "assistant",
@@ -449,7 +550,7 @@ def main():
     st.markdown("---")
     st.caption(
         "⚠️ **AI is not magic** — This assistant generates answers using statistical models, "
-        "public sources (e.g. Wikipedia), and your dataset. "
+        "public sources (e.g. Wikipedia, VirusHostDB), and your dataset. "
         "Results may contain errors and should be verified for scientific or medical use."
     )
 
