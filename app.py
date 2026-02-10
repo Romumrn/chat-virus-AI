@@ -2,22 +2,17 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
-import json
 import os
-import io
 import re
 import plotly.express as px
 import plotly.graph_objects as go
-import traceback
-import warnings
-from bs4 import BeautifulSoup
-
-warnings.filterwarnings("ignore")
+import traceback 
+ 
 
 # ==================== CONSTANTS ==================== #
-DEFAULT_CSV_PATH = "viral_taxo.csv"
-OLLAMA_BASE_URL = "http://localhost:11434"
-WIKIPEDIA_API = "https://en.wikipedia.org/api/rest_v1/page/summary/"
+DEFAULT_CSV_PATH = "data/viral_taxo.csv"
+HOST_DB_PATH = "data/virushostdb.tsv"
+OLLAMA_BASE_URL = "http://localhost:11434" 
 PAGE_TITLE = "Virus Dataset AI Agent 🦠"
 
 # ==================== REAL TOOL IMPLEMENTATIONS ==================== #
@@ -47,67 +42,43 @@ def wikipedia_search(search_term: str) -> dict:
     extract = page.get("extract", "")
     page_url = f"https://en.wikipedia.org/wiki/{page_title.replace(' ', '_')}"
 
+    if len(extract) > 10000:  # Limit to ~10000 chars
+        extract = extract[:10000] + "... [truncated]"
+        
     return {
         "success": True,
         "title": page_title,
         "extract": extract,
         "url": page_url
     }
-
-def virushostdb_search(search_term: str) -> dict:
-    """Search VirusHostDB and return host information"""
+    
+def query_host_dataframe(code: str, host_df: pd.DataFrame) -> dict:
     try:
-        search_url = f"https://www.genome.jp/virushostdb/view/?mode=view&search_text={requests.utils.quote(search_term)}"
+        env = {"host_df": host_df, "pd": pd, "np": np}
+        exec(code, {}, env)
+
+        if "result" not in env:
+            return {"success": False, "message": "Code must assign a DataFrame to variable 'result'"}
+
+        result = env["result"]
+
+        if not isinstance(result, pd.DataFrame):
+            return {"success": False, "message": "'result' must be a pandas DataFrame"}
+
+        preview = (result.to_string(index=False) if len(result) <= 50 
+                   else result.head(50).to_string(index=False) + f"\n... and {len(result)-50} more rows")
         
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        
-        r = requests.get(search_url, headers=headers, timeout=10)
-        if r.status_code != 200:
-            return {"success": False, "message": f"Failed to access VirusHostDB for {search_term}"}
-        
-        soup = BeautifulSoup(r.content, 'html.parser')
-        
-        # Extract main content area (avoid headers/footers)
-        main_content = soup.find('div', id='main') or soup.find('div', class_='content') or soup
-        
-        # Get text but clean it
-        page_text = main_content.get_text(separator='\n', strip=True)
-        
-        # Check if there are results
-        if "No data" in page_text or "not found" in page_text.lower() or len(page_text) < 50:
-            return {"success": False, "message": f"No host data found for {search_term}"}
-        
-        # Extract structured data (table rows are most reliable)
-        host_data = []
-        for tr in main_content.find_all('tr'):
-            cells = [td.get_text(strip=True) for td in tr.find_all(['td', 'th'])]
-            if len(cells) >= 2:  # Only keep rows with at least 2 columns
-                host_data.append(' | '.join(cells))
-        
-        # Format results
-        if host_data:
-            formatted_results = '\n'.join(host_data)
-        else:
-            # Fallback: clean text extraction
-            lines = page_text.split('\n')
-            filtered_lines = [
-                line for line in lines 
-                if line and len(line) > 10 and 
-                not any(skip in line for skip in ['Home', 'Search', 'Copyright', 'Download', 'Help', 'About'])
-            ]
-            formatted_results = '\n'.join(filtered_lines[:20])
-        
+        print( "PREVIEW", preview)
         return {
             "success": True,
-            "search_term": search_term,
-            "results": formatted_results,
-            "url": search_url
+            "result": result,
+            "shape": result.shape,
+            "preview": preview
         }
-        
-    except Exception as e:
-        return {"success": False, "message": f"Error searching VirusHostDB: {str(e)}"}
+
+    except Exception:
+        return {"success": False, "message": traceback.format_exc()}
+
 
 def query_dataframe(code: str, df: pd.DataFrame) -> dict:
     try:
@@ -170,27 +141,7 @@ TOOLS_SPEC = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "search_term": {
-                        "type": "string",
-                        "description": "Exact term to search on Wikipedia"
-                    }
-                },
-                "required": ["search_term"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "virushostdb_search",
-            "description": "Search the VirusHostDB database to get host organism information for a virus. Returns a table with virus-host relationships.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "search_term": {
-                        "type": "string",
-                        "description": "Virus name to search for host information (e.g., 'orthopoxvirus', 'influenza')"
-                    }
+                    "search_term": {"type": "string"}
                 },
                 "required": ["search_term"]
             }
@@ -200,14 +151,25 @@ TOOLS_SPEC = [
         "type": "function",
         "function": {
             "name": "query_dataframe",
-            "description": "Execute pandas code on df and RETURN a pandas DataFrame. The variable 'result' MUST be a pandas DataFrame. This DataFrame will automatically be stored as 'last_result' for subsequent tools.",
+            "description": "Execute pandas code on viral taxonomy dataframe",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "Python code using df and assigning output to variable 'result'"
-                    }
+                    "code": {"type": "string"}
+                },
+                "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_host_dataframe",
+            "description": "Query local VirusHostDB dataset to retrieve host organisms for viruses",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string"}
                 },
                 "required": ["code"]
             }
@@ -217,14 +179,11 @@ TOOLS_SPEC = [
         "type": "function",
         "function": {
             "name": "plot_dataframe",
-            "description": "Create a Plotly chart ONLY from 'last_result'. DO NOT compute or modify data. DO NOT reference 'df'. Use 'last_result' exactly as provided.",
+            "description": "Create a Plotly chart from last_result",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "Python code using df, px, go, and last_result (DataFrame from previous query). Assign figure to variable 'fig'."
-                    }
+                    "code": {"type": "string"}
                 },
                 "required": ["code"]
             }
@@ -232,42 +191,64 @@ TOOLS_SPEC = [
     }
 ]
 
+
 # ==================== REAL AGENT LOOP ==================== #
 
-def ollama_agent_loop(model: str, user_query: str, df: pd.DataFrame):
+def ollama_agent_loop(model: str, user_query: str, df: pd.DataFrame,host_df ):
+    
+    df_columns_str = ", ".join(df.columns)
+    host_df_columns_str = ", ".join(host_df.columns)
+
     messages = [
         {
             "role": "system",
-            "content": """You are a scientific bioinformatics assistant specialized in virus.
+            "content": f"""You are a scientific bioinformatics assistant specialized in viruses.
 
 You work with:
-- A pandas DataFrame called `df` containing viral taxonomy data with columns: ORGANISM_NAME,TAX_ID,PARENT_TAX_ID,RANK,SPECIES_NAME,GENUS_NAME,FAMILY_NAME,ORDER_NAME,CLASS_NAME,PHYLUM_NAME,KINGDOM_NAME,SUPERKINGDOM_NAME,HAS_GENOME_ASSEMBLY,NUM_GENOME_ASSEMBLIES,MAX_GENOME_SIZE,HAS_STAT_KMER,NUM_STAT_KMER,HAS_STAT,NUM_POSITIVE_STAT_SAMPLE,SUM_STAT_TOTAL_COUNT,HAS_STAT_ECO,NUM_POSITIVE_STAT_SAMPLE_ECO,SUM_STAT_TOTAL_COUNT_ECO,HAS_GBIF,NUM_GBIF_OBSERVATIONS,NUM_SRA_SAMPLES,NUM_GSA_SAMPLES,NUM_COLLECTION_DATE,FIRST_COLLECTION_DATE,LAST_COLLECTION_DATE,NUM_LATLON
-- Trusted public biological sources (e.g. Wikipedia, VirusHostDB) accessed ONLY via tools
+
+- A pandas DataFrame called `df` containing viral taxonomy data.
+  Available columns:
+  {df_columns_str}
+
+- A pandas DataFrame called `host_df` containing virus-host relationships from VirusHostDB.
+  Available columns:
+  {host_df_columns_str}
+
+- Access to Wikipedia ONLY via tools.
 
 STRICT RULES:
-- Do NOT show dataset structure or column names in your responses
-- Do NOT invent facts, species, families, counts, or biological claims
+- Do NOT show dataset structure or column names in the final response.
+- NEVER invent column names.
+- Use ONLY the columns explicitly listed above.
+- Column names are case-sensitive.
+- Do NOT invent facts, species, families, counts, or biological claims.
 - If information is not present in the dataset or retrieved from a tool, explicitly say:
-   "This information is not available in the current dataset or sources."
+  "This information is not available in the current dataset or sources."
 - Every biological or taxonomic statement must be grounded in:
-   - the dataset (df / last_result), or
-   - an external tool response (e.g. Wikipedia, VirusHostDB)
-- Use tools if needed
-- Report information EXACTLY as returned by tools without interpretation
+  - a dataset query (`df` or `host_df`), or
+  - an external tool response (e.g. Wikipedia).
+- Use tools when required.
+- When using a dataset query, return only the minimal set of columns
+  strictly necessary to answer the question.
+- Report information EXACTLY as returned by tools or datasets, without interpretation.
 
 STYLE:
-- Scientific, concise, neutral
-- No speculation
-- No storytelling
-- Start directly with the answer, no preamble about dataset structure
+- Scientific, concise, neutral.
+- No speculation.
+- No storytelling.
+- Start directly with the answer.
+
+CRITICAL:
+- Answer ONLY the specific question asked by the user.
+- Do NOT assume intent or answer related questions.
+- Do NOT retrieve or discuss drugs, cancer, treatments, or unrelated medical topics.
 """
         },
         {"role": "user", "content": user_query}
     ]
 
     used_sources = set()
-    used_wikipedia_urls = []
-    used_virushostdb_urls = []
+    used_wikipedia_urls = [] 
     executed_codes = []
 
     print("="*100)
@@ -330,30 +311,6 @@ STYLE:
                             "content": output["message"]
                         })
 
-                elif name == "virushostdb_search":
-                    output = virushostdb_search(**args)
-                    if output["success"]:
-                        used_sources.add("VirusHostDB")
-                        used_virushostdb_urls.append(output["url"])
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": call["id"],
-                            "name": name,
-                            "content": (
-                                f"**VirusHostDB Results for '{output['search_term']}'**\n\n"
-                                f"{output['results']}\n\n"
-                                f"🔗 **Source**: {output['url']}"
-                            )
-                        })
-                        print("VIRUSHOSTDB", output)
-                    else:
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": call["id"],
-                            "name": name,
-                            "content": output["message"]
-                        })
-
                 elif name == "query_dataframe":
                     output = query_dataframe(args["code"], df)
                     used_sources.add("Dataset query")
@@ -377,7 +334,28 @@ STYLE:
                         "name": name,
                         "content": tool_content
                     })
+                elif name == "query_host_dataframe":
+                    output = query_host_dataframe(args["code"], host_df)
+                    used_sources.add("Local VirusHostDB")
 
+                    if output["success"]:
+                        last_result = output["result"]
+                        executed_codes.append(args["code"])
+                        tool_content = (
+                            "Host DataFrame stored as last_result.\n"
+                            f"- shape: {output['shape']}\n"
+                            f"- preview:\n{output['preview']}"
+                        )
+                    else:
+                        tool_content = f"Error:\n{output['message']}"
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": call["id"],
+                        "name": name,
+                        "content": tool_content
+                    })
+                
                 elif name == "plot_dataframe":
                     fig, output = plot_dataframe(args["code"], df, last_result)
                     if fig is not None:
@@ -402,7 +380,7 @@ STYLE:
         else:
             messages.append(msg)
             print("Content:", msg["content"])
-            return msg["content"], messages, generated_figures, used_sources, used_wikipedia_urls, used_virushostdb_urls, executed_codes
+            return msg["content"], messages, generated_figures, used_sources, used_wikipedia_urls, executed_codes
 
 # ==================== DATA LOADING ==================== #
 
@@ -412,6 +390,11 @@ def load_dataframe(path):
         return None
     return pd.read_csv(path)
 
+@st.cache_data(show_spinner=False)
+def load_host_dataframe(path):
+    if not os.path.exists(path):
+        return None
+    return pd.read_csv(path, sep="\t", dtype=str)
 # ==================== STREAMLIT APP ==================== #
 
 def main():
@@ -463,8 +446,10 @@ def main():
             st.stop()
 
         df = load_dataframe(DEFAULT_CSV_PATH)
-        if df is None:
-            st.error("Dataset not found")
+        host_df = load_host_dataframe(HOST_DB_PATH)
+
+        if df is None or host_df is None:
+            st.error("Required dataset not found")
             st.stop()
 
         models_response = requests.get(f"{OLLAMA_BASE_URL}/api/tags").json()
@@ -505,8 +490,9 @@ def main():
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                answer, messages_history, new_figures, used_sources, used_wikipedia_urls, used_virushostdb_urls, executed_codes = ollama_agent_loop(model, query, df)
-
+                answer, messages_history, new_figures, used_sources, used_wikipedia_urls,  executed_codes = (
+    ollama_agent_loop(model, query, df, host_df)
+)
                 st.markdown(answer)
 
                 if used_sources:
@@ -517,10 +503,6 @@ def main():
                             f"[{url.split('/')[-1].replace('_', ' ')}]({url})"
                             for url in used_wikipedia_urls)
                         st.markdown(f"**📘 Wikipedia**: {wiki_str}")
-
-                    if used_virushostdb_urls:
-                        vhdb_str = ", ".join(f"[Search]({url})" for url in used_virushostdb_urls)
-                        st.markdown(f"**🦠 VirusHostDB**: {vhdb_str}")
 
                     # Section Dataset Query
                     if executed_codes:
