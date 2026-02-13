@@ -17,6 +17,7 @@ PAGE_TITLE = "Virus Dataset AI Agent 🦠"
 
 # ==================== REAL TOOL IMPLEMENTATIONS ==================== #
 
+
 def wikipedia_search(search_term: str) -> dict:
     term = re.sub(r"[^\w\s\-]", "", search_term.strip())
     title = requests.utils.quote(term)
@@ -70,21 +71,21 @@ def query_and_plot(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame) -> d
         exec(code, {}, env)
 
         response = {"success": True}
-        
+
         # Check for result DataFrame
         if "result" in env:
             result = env["result"]
             if not isinstance(result, pd.DataFrame):
                 return {
-                    "success": False, 
+                    "success": False,
                     "message": "Error: 'result' must be a pandas DataFrame"
                 }
-            
+
             preview = (
                 result.to_string(index=False) if len(result) <= 50
                 else result.head(50).to_string(index=False) + f"\n... and {len(result)-50} more rows"
             )
-            
+
             response["has_result"] = True
             response["result"] = result
             response["shape"] = result.shape
@@ -92,7 +93,7 @@ def query_and_plot(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame) -> d
             response["preview"] = preview
         else:
             response["has_result"] = False
-        
+
         # Check for figure
         if "fig" in env:
             fig = env["fig"]
@@ -105,20 +106,21 @@ def query_and_plot(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame) -> d
             response["figure"] = fig
         else:
             response["has_figure"] = False
-        
+
         # Must have at least one output
         if not response["has_result"] and not response["has_figure"]:
             return {
                 "success": False,
                 "message": "Error: code must assign 'result' (DataFrame) and/or 'fig' (Plotly figure)"
             }
-        
+
         return response
 
     except Exception:
         return {"success": False, "message": traceback.format_exc()}
 
 # ==================== OLLAMA TOOL DEFINITIONS ==================== #
+
 
 TOOLS_SPEC = [
     {
@@ -177,6 +179,7 @@ TOOLS_SPEC = [
 ]
 
 # ====================      AGENT LOOP    ==================== #
+
 
 def ollama_agent_loop(model: str, user_query: str, df_taxo: pd.DataFrame, df_host):
 
@@ -309,7 +312,7 @@ CRITICAL:
 
                         # Build response message
                         tool_msg_parts = []
-                        
+
                         if output.get("has_result"):
                             tool_msg_parts.append(
                                 "Query executed successfully.\n"
@@ -317,11 +320,12 @@ CRITICAL:
                                 f"- Columns: {', '.join(output['columns'])}\n"
                                 f"- Preview:\n{output['preview']}"
                             )
-                        
+
                         if output.get("has_figure"):
                             generated_figures.append(output["figure"])
-                            tool_msg_parts.append("Visualization created successfully.")
-                        
+                            tool_msg_parts.append(
+                                "Visualization created successfully.")
+
                         tool_msg = "\n\n".join(tool_msg_parts)
                     else:
                         tool_msg = f"Error:\n{output['message']}"
@@ -349,6 +353,7 @@ CRITICAL:
             return msg["content"], messages, generated_figures, used_sources, used_wikipedia_urls, executed_codes
 
 # ==================== DATA LOADING ==================== #
+
 @st.cache_data(show_spinner=False)
 def load_dataframe(path):
     if not os.path.exists(path):
@@ -361,7 +366,98 @@ def load_host_dataframe(path):
         return None
     return pd.read_csv(path, sep="\t", dtype=str)
 
+# ==================== MODAL RENDERING ==================== #
+
+
+@st.dialog("Result 🦠", width="large")
+def show_response_modal(modal_idx):
+
+    if modal_idx is None or modal_idx >= len(st.session_state.modal_data):
+        st.error("No modal data to display")
+        return
+
+    modal_data = st.session_state.modal_data[modal_idx]
+
+    # Header
+    st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        ">
+            <h3 style="margin: 0; color: white;">{modal_data["question"]}</h3>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # ================= LOADING STATE =================
+    if modal_data["answer"] is None:
+
+        with st.spinner("Thinking..."):
+
+            answer, messages_history, new_figures, used_sources, used_wikipedia_urls, executed_codes = (
+                ollama_agent_loop(
+                    st.session_state.selected_model,
+                    modal_data["question"],
+                    st.session_state.df_taxo,
+                    st.session_state.df_host
+                )
+            )
+
+            # Update modal data
+            st.session_state.modal_data[modal_idx] = {
+                "question": modal_data["question"],
+                "answer": answer,
+                "figures": new_figures,
+                "used_sources": used_sources,
+                "wikipedia_urls": used_wikipedia_urls,
+                "executed_codes": executed_codes
+            }
+
+        st.rerun()
+
+    # ================= DISPLAY STATE =================
+    else:
+        st.markdown("### Answer:")
+        st.markdown(modal_data["answer"])
+
+        if modal_data.get("figures"):
+            for idx, fig in enumerate(modal_data["figures"]):
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    key=f"modal_fig_{modal_idx}_{idx}"
+                )
+
+        if modal_data.get("used_sources"):
+            st.markdown("---")
+            st.markdown("### Used Sources:")
+
+            if modal_data.get("wikipedia_urls"):
+                wiki_links = ", ".join(
+                    f"[{url.split('/')[-1].replace('_', ' ')}]({url})"
+                    for url in modal_data["wikipedia_urls"]
+                )
+                st.markdown(f"**📘 Wikipedia**: {wiki_links}")
+
+            if modal_data.get("executed_codes"):
+                st.markdown("**📊 Dataset Query**")
+                with st.expander("See code"):
+                    full_code = "\n\n---\n\n".join(
+                        f"# Code {i}\n{code}"
+                        for i, code in enumerate(
+                            modal_data["executed_codes"], 1
+                        )
+                    )
+                    st.code(full_code, language="python")
+
+        if st.button("Close"):
+            st.session_state.active_modal_idx = None
+            st.rerun()
+
 # ==================== STREAMLIT APP ==================== #
+
 
 def main():
     st.set_page_config(page_title=PAGE_TITLE, page_icon="🦠", layout="wide")
@@ -376,6 +472,11 @@ def main():
         .stChatMessage {
             border-radius: 14px;
             padding: 0.75rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .stChatMessage:hover {
+            background-color: rgba(100, 126, 234, 0.05);
         }
         </style>
         """,
@@ -397,8 +498,9 @@ def main():
     """)
 
     with st.sidebar:
-        st.markdown("### 🧬 Virus AI Agent")
-        st.caption("Explore viral taxonomy with AI-assisted analysis")
+        st.markdown("### Virus AI Agent")
+        st.caption(
+            "Explore viral taxonomy with AI-assisted analysis. Here you have an access to a curated databases about virus ....")
         st.header("Configuration")
 
         try:
@@ -433,62 +535,86 @@ def main():
             help="Model for agentic reasoning (Be sure to select a model able to use tools)"
         )
 
+    # Initialize session state
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    if "figures" not in st.session_state:
-        st.session_state.figures = []
+    if "modal_data" not in st.session_state:
+        st.session_state.modal_data = []
+    
+    if "active_modal_idx" not in st.session_state:
+        st.session_state.active_modal_idx = None
+    
+    # Store model and dataframes in session state
+    if "selected_model" not in st.session_state:
+        st.session_state.selected_model = model
+    else:
+        st.session_state.selected_model = model
+    
+    if "df_taxo" not in st.session_state:
+        st.session_state.df_taxo = df_taxo
+    
+    if "df_host" not in st.session_state:
+        st.session_state.df_host = df_host
 
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    # for fig in st.session_state.figures:
-    #     st.plotly_chart(fig, width='stretch')
+    # Display chat messages
+    for idx, msg in enumerate(st.session_state.messages):
+        if msg["role"] == "user":
+            with st.chat_message("user"):
+                st.markdown(msg["content"])
+        else:  # assistant
+            with st.chat_message("assistant"):
+                # Show clickable question that reopens the modal
+                modal_idx = msg.get("modal_idx")
+                if modal_idx is not None:
+                    question = st.session_state.modal_data[modal_idx]["question"]
+                    if st.button(
+                        f"💬 {question}",
+                        key=f"reopen_modal_{idx}",
+                        use_container_width=True,
+                        help="Click to open"
+                    ):
+                        st.session_state.active_modal_idx = modal_idx
+                        st.rerun()
+                else:
+                    st.markdown(msg["content"])
+    
+    # Show modal if active
+    if st.session_state.active_modal_idx is not None:
+        show_response_modal(st.session_state.active_modal_idx)
 
     query = st.chat_input("Ask about viruses...")
 
     if query:
-        st.session_state.messages.append({"role": "user", "content": query})
+
+        st.session_state.messages.append({
+            "role": "user",
+            "content": query
+        })
 
         with st.chat_message("user"):
             st.markdown(query)
 
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                answer, messages_history, new_figures, used_sources, used_wikipedia_urls, executed_codes = (
-                    ollama_agent_loop(model, query, df_taxo, df_host)
-                )
-                st.markdown(answer)
+        # Create empty modal entry
+        modal_idx = len(st.session_state.modal_data)
 
-                if used_sources:
-                    st.markdown("##### 🔎 Sources used")
-
-                    if used_wikipedia_urls:
-                        wiki_str = ", ".join(
-                            f"[{url.split('/')[-1].replace('_', ' ')}]({url})"
-                            for url in used_wikipedia_urls)
-                        st.markdown(f"**📘 Wikipedia**: {wiki_str}")
-
-                    # Section Dataset Query
-                    if executed_codes:
-                        st.markdown("**📊 Dataset Query & Visualization**")
-                        with st.expander("View all executed codes"):
-                            full_code = "\n\n---\n\n".join(
-                                f"# Code {i}\n{code}"
-                                for i, code in enumerate(executed_codes, 1)
-                            )
-                            st.code(full_code, language="python")
-
-            # Display figures outside the sources block
-            for fig in new_figures:
-                st.plotly_chart(fig, width='stretch')
-                st.session_state.figures.append(fig)
+        st.session_state.modal_data.append({
+            "question": query,
+            "answer": None,
+            "figures": None,
+            "used_sources": None,
+            "wikipedia_urls": None,
+            "executed_codes": None
+        })
 
         st.session_state.messages.append({
             "role": "assistant",
-            "content": answer
+            "content": "",
+            "modal_idx": modal_idx
         })
+
+        st.session_state.active_modal_idx = modal_idx
+        st.rerun()
 
     st.markdown("---")
     st.caption(
