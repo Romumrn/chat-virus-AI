@@ -19,6 +19,7 @@ PAGE_TITLE = "Virus Dataset AI Agent 🦠"
 
 
 def wikipedia_search(search_term: str) -> dict:
+    LIMIT = 5000
     term = re.sub(r"[^\w\s\-]", "", search_term.strip())
     title = requests.utils.quote(term)
 
@@ -43,8 +44,8 @@ def wikipedia_search(search_term: str) -> dict:
     extract = page.get("extract", "")
     page_url = f"https://en.wikipedia.org/wiki/{page_title.replace(' ', '_')}"
 
-    if len(extract) > 10000:  # Limit to ~10000 chars
-        extract = extract[:10000] + "... [truncated]"
+    if len(extract) > LIMIT:  # Limit to Xchars
+        extract = extract[:LIMIT] + "... [truncated]"
 
     return {
         "success": True,
@@ -53,11 +54,55 @@ def wikipedia_search(search_term: str) -> dict:
         "url": page_url
     }
 
-
-def query_and_plot(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame) -> dict:
+def query_dataframe(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame) -> dict:
     """
-    Execute pandas code that can query dataframes and/or create visualizations.
-    Code can assign 'result' (DataFrame) and/or 'fig' (Plotly figure).
+    Execute pandas code to query and extract data from dataframes.
+    Code must assign the result to 'result' variable (pandas DataFrame).
+    """
+    try:
+        env = {
+            "df_taxo": df_taxo,
+            "df_host": df_host,
+            "pd": pd,
+            "np": np
+        }
+        exec(code, {}, env)
+
+        # Check for result DataFrame
+        if "result" not in env:
+            return {
+                "success": False,
+                "message": "Error: code must assign 'result' variable (pandas DataFrame)"
+            }
+        
+        result = env["result"]
+        if not isinstance(result, pd.DataFrame):
+            return {
+                "success": False,
+                "message": f"Error: 'result' must be a pandas DataFrame, got {type(result)}"
+            }
+
+        preview = (
+            result.to_string(index=False) if len(result) <= 50
+            else result.head(50).to_string(index=False) + f"\n... and {len(result)-50} more rows"
+        )
+
+        return {
+            "success": True,
+            "result": result,
+            "shape": result.shape,
+            "columns": list(result.columns),
+            "preview": preview
+        }
+
+    except Exception:
+        return {"success": False, "message": traceback.format_exc()}
+
+
+def create_visualization(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame) -> dict:
+    """
+    Execute pandas code to create a Plotly visualization.
+    Code must assign the figure to 'fig' variable (Plotly figure).
     """
     try:
         env = {
@@ -70,51 +115,24 @@ def query_and_plot(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame) -> d
         }
         exec(code, {}, env)
 
-        response = {"success": True}
-
-        # Check for result DataFrame
-        if "result" in env:
-            result = env["result"]
-            if not isinstance(result, pd.DataFrame):
-                return {
-                    "success": False,
-                    "message": "Error: 'result' must be a pandas DataFrame"
-                }
-
-            preview = (
-                result.to_string(index=False) if len(result) <= 50
-                else result.head(50).to_string(index=False) + f"\n... and {len(result)-50} more rows"
-            )
-
-            response["has_result"] = True
-            response["result"] = result
-            response["shape"] = result.shape
-            response["columns"] = list(result.columns)
-            response["preview"] = preview
-        else:
-            response["has_result"] = False
-
         # Check for figure
-        if "fig" in env:
-            fig = env["fig"]
-            if not isinstance(fig, (go.Figure, go.FigureWidget)):
-                return {
-                    "success": False,
-                    "message": f"Error: 'fig' must be a Plotly figure, got {type(fig)}"
-                }
-            response["has_figure"] = True
-            response["figure"] = fig
-        else:
-            response["has_figure"] = False
-
-        # Must have at least one output
-        if not response["has_result"] and not response["has_figure"]:
+        if "fig" not in env:
             return {
                 "success": False,
-                "message": "Error: code must assign 'result' (DataFrame) and/or 'fig' (Plotly figure)"
+                "message": "Error: code must assign 'fig' variable (Plotly figure)"
+            }
+        
+        fig = env["fig"]
+        if not isinstance(fig, (go.Figure, go.FigureWidget)):
+            return {
+                "success": False,
+                "message": f"Error: 'fig' must be a Plotly figure, got {type(fig)}"
             }
 
-        return response
+        return {
+            "success": True,
+            "figure": fig
+        }
 
     except Exception:
         return {"success": False, "message": traceback.format_exc()}
@@ -140,37 +158,71 @@ TOOLS_SPEC = [
     {
         "type": "function",
         "function": {
-            "name": "query_and_plot",
+            "name": "query_dataframe",
             "description": (
-                "Execute pandas code on viral taxonomy (df_taxo) and host relationship (df_host) dataframes. "
-                "You can query data and/or create visualizations in the same code block. "
+                "Execute pandas code to query and extract data from viral datasets. "
+                "Use this tool when you need to retrieve, filter, aggregate, or analyze data.\n\n"
 
                 "Available variables:\n"
                 "- df_taxo: viral taxonomy DataFrame\n"
                 "- df_host: virus-host relationships DataFrame\n"
-                "- pd, np: pandas and numpy\n"
-                "- px, go: plotly.express and plotly.graph_objects\n"
+                "- pd: pandas library\n"
+                "- np: numpy library\n\n"
 
-                "Output variables:\n"
-                "- Assign query results to 'result' (pandas DataFrame) - REQUIRED for data queries\n"
-                "- Assign visualization to 'fig' (Plotly figure) - REQUIRED for plots\n"
-                "- You can assign both in the same code block\n"
+                "Output:\n"
+                "- You MUST assign your query result to the variable 'result' (pandas DataFrame)\n\n"
 
                 "Examples:\n"
-                "# Query only:\n"
-                "result = df_taxo.groupby('family').size().reset_index(name='count')\n"
-                "\n"
-                "# Plot only:\n"
-                "fig = px.bar(df_taxo.groupby('family').size().reset_index(name='count'), x='family', y='count')\n"
-                "\n"
-                "# Query + Plot:\n"
-                "result = df_taxo.groupby('family').size().reset_index(name='count')\n"
-                "fig = px.bar(result, x='family', y='count', title='Species per Family')"
+                "# Count species per family:\n"
+                "result = df_taxo.groupby('family').size().reset_index(name='count')\n\n"
+                "# Filter by specific genus:\n"
+                "result = df_taxo[df_taxo['genus'] == 'Orthopoxvirus']\n\n"
+                "# Get top 10 families by species count:\n"
+                "result = df_taxo.groupby('family').size().reset_index(name='count').sort_values('count', ascending=False).head(10)"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "code": {"type": "string"}
+                    "code": {"type": "string", "description": "Pandas code to execute. Must assign result to 'result' variable."}
+                },
+                "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_visualization",
+            "description": (
+                "Execute pandas code to create a Plotly visualization. "
+                "Use this tool when you need to create charts, graphs, or plots.\n\n"
+
+                "Available variables:\n"
+                "- df_taxo: viral taxonomy DataFrame\n"
+                "- df_host: virus-host relationships DataFrame\n"
+                "- pd: pandas library\n"
+                "- np: numpy library\n"
+                "- px: plotly.express library\n"
+                "- go: plotly.graph_objects library\n\n"
+
+                "Output:\n"
+                "- You MUST assign your Plotly figure to the variable 'fig'\n\n"
+
+                "Examples:\n"
+                "# Bar chart of species per family:\n"
+                "data = df_taxo.groupby('family').size().reset_index(name='count')\n"
+                "fig = px.bar(data, x='family', y='count', title='Species per Family')\n\n"
+                "# Pie chart of genus distribution:\n"
+                "data = df_taxo.groupby('genus').size().reset_index(name='count').head(10)\n"
+                "fig = px.pie(data, values='count', names='genus', title='Top 10 Genera')\n\n"
+                "# Horizontal bar chart:\n"
+                "data = df_taxo.groupby('family').size().reset_index(name='count').sort_values('count', ascending=False).head(15)\n"
+                "fig = px.bar(data, x='count', y='family', orientation='h', title='Top 15 Families')"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Pandas/Plotly code to execute. Must assign figure to 'fig' variable."}
                 },
                 "required": ["code"]
             }
@@ -220,10 +272,10 @@ STRICT RULES:
 - Report information EXACTLY as returned by tools or datasets, without interpretation.
 
 TOOL USAGE:
-- Use query_and_plot for ANY data query or visualization
-- You can create both a query result AND a plot in the same code block
-- For plots, always assign the figure to variable 'fig'
-- For queries, always assign the result to variable 'result'
+- Use query_dataframe for data extraction, filtering, aggregation, and analysis
+- Use create_visualization for creating charts, graphs, and plots
+- Use wikipedia_search for external biological/scientific information
+- For queries that need both data AND visualization, call query_dataframe first, then create_visualization
 
 STYLE:
 - Scientific, concise, neutral.
@@ -243,7 +295,7 @@ CRITICAL:
     used_sources = set()
     used_wikipedia_urls = []
     executed_codes = []
-
+    tool_call_count = 0  # Track number of tool calls
     print("="*100)
     print("USER QUERY:", user_query)
     generated_figures = []
@@ -255,7 +307,13 @@ CRITICAL:
                 "model": model,
                 "messages": messages,
                 "tools": TOOLS_SPEC,
-                "stream": False
+                "stream": False,
+                "options": {
+                    "temperature": 0,
+                    "top_p": 1,
+                    "repeat_penalty": 1.0,
+                    "seed": 42
+                    }
             },
             timeout=120
         )
@@ -275,6 +333,7 @@ CRITICAL:
             })
 
             for call in msg["tool_calls"]:
+                tool_call_count += 1
                 print(call)
                 name = call["function"]["name"]
                 args = call["function"]["arguments"]
@@ -303,30 +362,37 @@ CRITICAL:
                             "content": output["message"]
                         })
 
-                elif name == "query_and_plot":
-                    output = query_and_plot(args["code"], df_taxo, df_host)
+                elif name == "query_dataframe":
+                    output = query_dataframe(args["code"], df_taxo, df_host)
 
                     if output["success"]:
                         executed_codes.append(args["code"])
                         used_sources.add("Dataset query")
 
-                        # Build response message
-                        tool_msg_parts = []
+                        tool_msg = (
+                            "Query executed successfully.\n"
+                            f"- Shape: {output['shape']}\n"
+                            f"- Columns: {', '.join(output['columns'])}\n"
+                            f"- Preview:\n{output['preview']}"
+                        )
+                    else:
+                        tool_msg = f"Error:\n{output['message']}"
 
-                        if output.get("has_result"):
-                            tool_msg_parts.append(
-                                "Query executed successfully.\n"
-                                f"- Shape: {output['shape']}\n"
-                                f"- Columns: {', '.join(output['columns'])}\n"
-                                f"- Preview:\n{output['preview']}"
-                            )
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": call["id"],
+                        "name": name,
+                        "content": tool_msg
+                    })
 
-                        if output.get("has_figure"):
-                            generated_figures.append(output["figure"])
-                            tool_msg_parts.append(
-                                "Visualization created successfully.")
+                elif name == "create_visualization":
+                    output = create_visualization(args["code"], df_taxo, df_host)
 
-                        tool_msg = "\n\n".join(tool_msg_parts)
+                    if output["success"]:
+                        executed_codes.append(args["code"])
+                        used_sources.add("Dataset visualization")
+                        generated_figures.append(output["figure"])
+                        tool_msg = "Visualization created successfully."
                     else:
                         tool_msg = f"Error:\n{output['message']}"
 
@@ -344,6 +410,13 @@ CRITICAL:
                         "name": name,
                         "content": f"Unknown tool: {name}"
                     })
+            
+            # After processing all tool calls, remind the model if many calls were made
+            if tool_call_count >= 5:
+                messages.append({
+                    "role": "system",
+                    "content": f"You have gathered information from {tool_call_count} tool calls. Now synthesize a final answer to the user's question: '{user_query}'"
+                })
 
             continue
 
@@ -426,7 +499,7 @@ def show_response_modal(modal_idx):
             for idx, fig in enumerate(modal_data["figures"]):
                 st.plotly_chart(
                     fig,
-                    use_container_width=True,
+                    width='content',
                     key=f"modal_fig_{modal_idx}_{idx}"
                 )
 
@@ -442,7 +515,7 @@ def show_response_modal(modal_idx):
                 st.markdown(f"**📘 Wikipedia**: {wiki_links}")
 
             if modal_data.get("executed_codes"):
-                st.markdown("**📊 Dataset Query**")
+                st.markdown("**📊 Dataset Query & Visualization**")
                 with st.expander("See code"):
                     full_code = "\n\n---\n\n".join(
                         f"# Code {i}\n{code}"
