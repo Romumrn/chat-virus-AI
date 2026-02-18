@@ -698,6 +698,8 @@ def main():
             f"penalty `{repeat_penalty}` · seed `{seed}` · "
             f"max calls `{max_tool_calls}` · preview `{preview_rows}` rows"
         )
+        
+        st.caption("🔗 GitHub: https://github.com/Romumrn/chat-virus-AI")
 
     # ==================== SESSION STATE ==================== #
     if "messages" not in st.session_state:

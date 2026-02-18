@@ -1,89 +1,196 @@
 # 🦠 Virus Dataset AI Agent
 
- 
-The agent answers questions by **querying the dataset** and, when needed, **retrieving information from Wikipedia**.
-All results are grounded in explicit sources to avoid unsupported claims.
+## 🌍 Project Context
+
+This project is developed within the framework of **SHAPE-Med@Lyon** and contributes to the structuring research initiative **Virome@tlas**.
+
+*Virome@tlas* aims to build an integrated digital platform for large-scale exploration and surveillance of the global virosphere. The project leverages publicly available sequencing data to analyze virus diversity, virus–host interactions, and ecological distribution patterns within a transdisciplinary **One Health** framework spanning human, animal, and environmental health.
+
+The Virus Dataset AI Agent supports this effort by providing a controlled, reproducible interface for structured exploration of viral taxonomy and virus–host datasets. It is designed as a research companion tool that combines:
+
+* Deterministic dataset querying
+* Transparent visualization generation
+* Controlled external knowledge retrieval
+* Strict grounding of all biological statements
+
+By constraining the language model to explicit data sources and documented tool calls, the system aims to reduce hallucination risk while preserving interpretability and scientific traceability.
 
 
-## Features
+## Goal
 
-* Query viral taxonomy data using natural language
-* Count and compare species, genera, and families
-* Generate Plotly visualizations (bar charts, pie charts)
-* Dataset queries and plots are fully transparent
-* External information retrieved only from Wikipedia
-* Local LLM execution via Ollama
+Large language models can assist biological research, but they are prone to hallucination and unsupported claims.
+This project implements a **tool-restricted agent architecture** that enforces:
 
+* Deterministic dataset querying
+* Transparent visualization generation
+* Controlled external knowledge retrieval
+* Strict grounding of all biological statements
 
-## Dataset
+The goal is to provide a **research companion interface** that preserves scientific reliability while enabling natural language exploration.
 
-The app expects a CSV file named:
+---
+
+## 🧬 Data Sources
+
+The system operates on structured viral datasets:
 
 ```
-viral_taxo.csv
+data/
+├── viral_taxo.csv
+└── virushostdb.tsv
 ```
 
-The dataset contains viral taxonomic information (species, genus, family, order, etc.) and associated metadata (genomic, ecological, and collection data) from SRA taxonomy.
+### Viral Taxonomy Dataset (`viral_taxo.csv`)
+
+* Taxonomic hierarchy (species, genus, family, order, etc.)
+* Associated genomic and metadata attributes
+* Derived from SRA taxonomy records
+
+### Virus–Host Dataset (`virushostdb.tsv`)
+
+* Virus–host relationships
+* Derived from VirusHostDB (genome.jp)
+
+All quantitative results originate strictly from these datasets.
+
+---
+
+## 🧠 Agent Architecture
+
+The agent uses a controlled tool-calling loop powered by a local LLM via Ollama.
+
+### Core Components
+
+#### 1`query_dataframe`
+
+Executes validated pandas code on the dataset.
+
+* Returns structured DataFrame output
+* Restricts access to known columns
+* Enforces assignment to a `result` variable
+* Provides reproducible previews
+
+####  `create_visualization`
+
+Generates Plotly figures.
+
+* Only permitted after structured queries
+* Requires explicit `fig` assignment
+* Produces deterministic visual outputs
+
+####  `wikipedia_search`
+
+Retrieves biological summaries from Wikipedia.
+
+* Plain-text extraction only
+* Character-limited responses
+* Explicit source URLs returned
+* No interpretation layer added
 
 
-## Agent behavior
+##  Scientific Constraints
 
-The assistant follows strict rules:
+The assistant operates under strict rules:
 
-* No invention of biological facts or counts
-* All statements must come from:
+* No invention of taxa, species counts, or biological claims
+* No use of implicit or hidden knowledge
+* No speculative interpretation
+* All biological statements must originate from:
 
-  * the dataset, or
-  * an explicit Wikipedia tool call
-* If information is unavailable, the agent states it clearly
-* Dataset analysis and plotting are separated and reproducible
+  * dataset queries, or
+  * documented Wikipedia tool calls
+* If information is unavailable, the agent states explicitly:
+
+> “This information is not available in the current dataset or sources.”
+
+This constraint framework is designed to reduce hallucination risk and increase reproducibility.
+
+---
+
+##  Capabilities
+
+* Natural language querying of viral taxonomy
+* Aggregation and comparative analysis
+* Species, genus, and family counts
+* Structured filtering and grouping
+* Interactive Plotly visualizations
+* Virus–host relationship exploration
+* Explicit source documentation
+
+---
+
+## Local Execution
+
+The system runs entirely locally:
+
+* LLM inference via Ollama
+* No external LLM APIs required
+* Wikipedia access via public API
+* All dataset processing performed locally
+
+This enables reproducibility and data control in research environments.
 
 
-## Tools
-
-* **query_dataframe**: runs pandas code on the dataset and returns a DataFrame
-* **plot_dataframe**: creates Plotly figures from the previous query result
-* **wikipedia_search**: retrieves biological summaries from Wikipedia
-* **...**: ..
-
-## Running the app
+## ⚙️ Installation
 
 ### Requirements
 
 * Python 3.9+
-* Ollama running locally
-* Pandas, Numpy, Ploltly 
+* Ollama installed and running
+* A tool-capable model (e.g., `gpt-oss`)
+* Python packages:
 
-### Install dependencies
+  * streamlit
+  * pandas
+  * numpy
+  * requests
+  * plotly
+
+
+### Install Dependencies
 
 ```bash
 pip install streamlit pandas numpy requests plotly
 ```
 
-### Pull a model
+### Pull a Model
 
 ```bash
 ollama pull gpt-oss
 ```
 
-### Start the app
+Ensure the selected model supports tool calling.
+
+
+### Run the Application
 
 ```bash
 streamlit run app.py
 ```
 
+
+## Example Research Queries
+
+* “Summarize Orthopoxvirus (family, genus, species count)”
+* “List virus families with more than 100 recorded species”
+* “Compare species counts between Orthomyxoviridae and Coronaviridae”
+* “Show a pie chart of genus distribution in Poxviridae”
+* “Give me hosts of Orthopoxvirus Abatino”
+
 ---
 
-## Example questions
+## Transparency & Reproducibility
 
-* “List virus families with more than 100 species”
-* “How many genera are in Retroviridae?”
-* “Show a bar chart of species count per family”
-* “Compare species counts between two families”
+* Executed pandas code can be inspected
+* Generated visualizations are deterministic
+* Wikipedia URLs are explicitly displayed
+* Tool calls are limited and traceable
+* Dataset access is column-restricted
 
----
+This architecture enables auditability and reproducible AI-assisted analysis.
 
-## Disclaimer
 
-This tool is for exploratory analysis only.
-Results should be verified before scientific or medical use.
+## ⚠️ Disclaimer
+
+This system is intended for exploratory and research support purposes only.
+All outputs should be independently verified before use in scientific or medical contexts.
