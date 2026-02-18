@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -15,11 +16,20 @@ HOST_DB_PATH = "data/virushostdb.tsv"
 OLLAMA_BASE_URL = "http://localhost:11434"
 PAGE_TITLE = "Virus Dataset AI Agent 🦠"
 
+# ==================== DEFAULT PARAMETERS ==================== #
+DEFAULT_TEMPERATURE = 0.0
+DEFAULT_TOP_P = 1.0
+DEFAULT_REPEAT_PENALTY = 1.0
+DEFAULT_SEED = 42
+DEFAULT_MAX_TOOL_CALLS = 5
+DEFAULT_PREVIEW_ROWS = 50
+DEFAULT_WIKIPEDIA_LIMIT = 5000
+
 # ==================== REAL TOOL IMPLEMENTATIONS ==================== #
 
 
-def wikipedia_search(search_term: str) -> dict:
-    LIMIT = 5000
+def wikipedia_search(search_term: str, wikipedia_limit: int = DEFAULT_WIKIPEDIA_LIMIT) -> dict:
+    LIMIT = wikipedia_limit
     term = re.sub(r"[^\w\s\-]", "", search_term.strip())
     title = requests.utils.quote(term)
 
@@ -44,7 +54,7 @@ def wikipedia_search(search_term: str) -> dict:
     extract = page.get("extract", "")
     page_url = f"https://en.wikipedia.org/wiki/{page_title.replace(' ', '_')}"
 
-    if len(extract) > LIMIT:  # Limit to Xchars
+    if len(extract) > LIMIT:
         extract = extract[:LIMIT] + "... [truncated]"
 
     return {
@@ -54,7 +64,7 @@ def wikipedia_search(search_term: str) -> dict:
         "url": page_url
     }
 
-def query_dataframe(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame) -> dict:
+def query_dataframe(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame, preview_rows: int = DEFAULT_PREVIEW_ROWS) -> dict:
     """
     Execute pandas code to query and extract data from dataframes.
     Code must assign the result to 'result' variable (pandas DataFrame).
@@ -68,7 +78,6 @@ def query_dataframe(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame) -> 
         }
         exec(code, {}, env)
 
-        # Check for result DataFrame
         if "result" not in env:
             return {
                 "success": False,
@@ -83,8 +92,8 @@ def query_dataframe(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame) -> 
             }
 
         preview = (
-            result.to_string(index=False) if len(result) <= 50
-            else result.head(50).to_string(index=False) + f"\n... and {len(result)-50} more rows"
+            result.to_string(index=False) if len(result) <= preview_rows
+            else result.head(preview_rows).to_string(index=False) + f"\n... and {len(result)-preview_rows} more rows"
         )
 
         return {
@@ -115,7 +124,6 @@ def create_visualization(code: str, df_taxo: pd.DataFrame, df_host: pd.DataFrame
         }
         exec(code, {}, env)
 
-        # Check for figure
         if "fig" not in env:
             return {
                 "success": False,
@@ -233,7 +241,19 @@ TOOLS_SPEC = [
 # ====================      AGENT LOOP    ==================== #
 
 
-def ollama_agent_loop(model: str, user_query: str, df_taxo: pd.DataFrame, df_host):
+def ollama_agent_loop(
+    model: str,
+    user_query: str,
+    df_taxo: pd.DataFrame,
+    df_host,
+    temperature: float = DEFAULT_TEMPERATURE,
+    top_p: float = DEFAULT_TOP_P,
+    repeat_penalty: float = DEFAULT_REPEAT_PENALTY,
+    seed: int = DEFAULT_SEED,
+    max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
+    preview_rows: int = DEFAULT_PREVIEW_ROWS,
+    wikipedia_limit: int = DEFAULT_WIKIPEDIA_LIMIT,
+):
 
     df_taxo_columns_str = ", ".join(df_taxo.columns)
     df_host_columns_str = ", ".join(df_host.columns)
@@ -295,7 +315,7 @@ CRITICAL:
     used_sources = set()
     used_wikipedia_urls = []
     executed_codes = []
-    tool_call_count = 0  # Track number of tool calls
+    tool_call_count = 0
     print("="*100)
     print("USER QUERY:", user_query)
     generated_figures = []
@@ -309,11 +329,11 @@ CRITICAL:
                 "tools": TOOLS_SPEC,
                 "stream": False,
                 "options": {
-                    "temperature": 0,
-                    "top_p": 1,
-                    "repeat_penalty": 1.0,
-                    "seed": 42
-                    }
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "repeat_penalty": repeat_penalty,
+                    "seed": seed
+                }
             },
             timeout=120
         )
@@ -339,7 +359,7 @@ CRITICAL:
                 args = call["function"]["arguments"]
 
                 if name == "wikipedia_search":
-                    output = wikipedia_search(**args)
+                    output = wikipedia_search(**args, wikipedia_limit=wikipedia_limit)
                     if output["success"]:
                         used_sources.add("Wikipedia")
                         used_wikipedia_urls.append(output["url"])
@@ -363,7 +383,7 @@ CRITICAL:
                         })
 
                 elif name == "query_dataframe":
-                    output = query_dataframe(args["code"], df_taxo, df_host)
+                    output = query_dataframe(args["code"], df_taxo, df_host, preview_rows=preview_rows)
 
                     if output["success"]:
                         executed_codes.append(args["code"])
@@ -411,11 +431,10 @@ CRITICAL:
                         "content": f"Unknown tool: {name}"
                     })
             
-            # After processing all tool calls, remind the model if many calls were made
-            if tool_call_count >= 5:
+            if tool_call_count >= max_tool_calls:
                 messages.append({
                     "role": "system",
-                    "content": f"You have gathered information from {tool_call_count} tool calls. Now synthesize a final answer to the user's question: '{user_query}'"
+                    "content": f"You have reached the tool call limit ({max_tool_calls}). Now synthesize a final answer to the user's question: '{user_query}'"
                 })
 
             continue
@@ -471,10 +490,17 @@ def show_response_modal(modal_idx):
 
             answer, messages_history, new_figures, used_sources, used_wikipedia_urls, executed_codes = (
                 ollama_agent_loop(
-                    st.session_state.selected_model,
-                    modal_data["question"],
-                    st.session_state.df_taxo,
-                    st.session_state.df_host
+                    model=st.session_state.selected_model,
+                    user_query=modal_data["question"],
+                    df_taxo=st.session_state.df_taxo,
+                    df_host=st.session_state.df_host,
+                    temperature=st.session_state.agent_params["temperature"],
+                    top_p=st.session_state.agent_params["top_p"],
+                    repeat_penalty=st.session_state.agent_params["repeat_penalty"],
+                    seed=st.session_state.agent_params["seed"],
+                    max_tool_calls=st.session_state.agent_params["max_tool_calls"],
+                    preview_rows=st.session_state.agent_params["preview_rows"],
+                    wikipedia_limit=st.session_state.agent_params["wikipedia_limit"],
                 )
             )
 
@@ -570,11 +596,20 @@ def main():
         
     """)
 
+
     with st.sidebar:
         st.markdown("### Virus AI Agent")
         st.caption(
-            "Explore viral taxonomy with AI-assisted analysis. Here you have an access to a curated databases about virus ....")
-        st.header("Configuration")
+            """
+            Explore viral taxonomy with AI-assisted analysis. 
+            Here you have an access to a curated databases about virus : Viral taxonomie from sra and viral host by genome.jp. Soon more datatabe will be added and this agent will be amazing...)
+            """
+        )
+        
+        # ==================== AGENT PARAMETERS ==================== #
+        st.markdown("---")
+        
+        st.subheader("⚙️ Agent Parameters")
 
         try:
             response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
@@ -595,6 +630,8 @@ def main():
         models_response = requests.get(f"{OLLAMA_BASE_URL}/api/tags").json()
         model_names = [m["name"] for m in models_response.get("models", [])]
 
+
+        
         if not model_names:
             st.error("No models available in Ollama")
             st.stop()
@@ -608,7 +645,61 @@ def main():
             help="Model for agentic reasoning (Be sure to select a model able to use tools)"
         )
 
-    # Initialize session state
+        with st.expander("🌡️ Sampling", expanded=False):
+            temperature = st.slider(
+                "Temperature",
+                min_value=0.0, max_value=2.0,
+                value=DEFAULT_TEMPERATURE, step=0.05,
+                help="Controls randomness. 0 = deterministic, higher = more creative."
+            )
+            top_p = st.slider(
+                "Top-p (nucleus sampling)",
+                min_value=0.0, max_value=1.0,
+                value=DEFAULT_TOP_P, step=0.05,
+                help="Cumulative probability cutoff for token selection. 1.0 = disabled."
+            )
+            repeat_penalty = st.slider(
+                "Repeat Penalty",
+                min_value=0.5, max_value=2.0,
+                value=DEFAULT_REPEAT_PENALTY, step=0.05,
+                help="Penalizes repeated tokens. 1.0 = no penalty, higher = less repetition."
+            )
+            seed = st.number_input(
+                "Seed",
+                min_value=-1, max_value=99999,
+                value=DEFAULT_SEED, step=1,
+                help="Random seed for reproducibility. -1 = random."
+            )
+
+        with st.expander("🔧 Agent Behaviour", expanded=False):
+            max_tool_calls = st.slider(
+                "Max Tool Calls",
+                min_value=1, max_value=20,
+                value=DEFAULT_MAX_TOOL_CALLS, step=1,
+                help="Maximum number of tool calls before forcing the model to produce a final answer."
+            )
+            preview_rows = st.slider(
+                "DataFrame Preview Rows",
+                min_value=5, max_value=200,
+                value=DEFAULT_PREVIEW_ROWS, step=5,
+                help="Number of rows shown to the LLM from query results. Higher = more context, more tokens."
+            )
+            wikipedia_limit = st.slider(
+                "Wikipedia Extract Limit (chars)",
+                min_value=500, max_value=20000,
+                value=DEFAULT_WIKIPEDIA_LIMIT, step=500,
+                help="Max number of characters fetched from Wikipedia. Higher = more context, more tokens."
+            )
+
+        # Summary badge
+        st.markdown("---")
+        st.markdown(
+            f"**Active config** — temp `{temperature}` · top_p `{top_p}` · "
+            f"penalty `{repeat_penalty}` · seed `{seed}` · "
+            f"max calls `{max_tool_calls}` · preview `{preview_rows}` rows"
+        )
+
+    # ==================== SESSION STATE ==================== #
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
@@ -618,26 +709,32 @@ def main():
     if "active_modal_idx" not in st.session_state:
         st.session_state.active_modal_idx = None
     
-    # Store model and dataframes in session state
-    if "selected_model" not in st.session_state:
-        st.session_state.selected_model = model
-    else:
-        st.session_state.selected_model = model
-    
+    st.session_state.selected_model = model
+
+    # Store agent params in session state so modal can access them
+    st.session_state.agent_params = {
+        "temperature": temperature,
+        "top_p": top_p,
+        "repeat_penalty": repeat_penalty,
+        "seed": seed,
+        "max_tool_calls": max_tool_calls,
+        "preview_rows": preview_rows,
+        "wikipedia_limit": wikipedia_limit,
+    }
+
     if "df_taxo" not in st.session_state:
         st.session_state.df_taxo = df_taxo
     
     if "df_host" not in st.session_state:
         st.session_state.df_host = df_host
 
-    # Display chat messages
+    # ==================== CHAT DISPLAY ==================== #
     for idx, msg in enumerate(st.session_state.messages):
         if msg["role"] == "user":
             with st.chat_message("user"):
                 st.markdown(msg["content"])
         else:  # assistant
             with st.chat_message("assistant"):
-                # Show clickable question that reopens the modal
                 modal_idx = msg.get("modal_idx")
                 if modal_idx is not None:
                     question = st.session_state.modal_data[modal_idx]["question"]
@@ -652,7 +749,6 @@ def main():
                 else:
                     st.markdown(msg["content"])
     
-    # Show modal if active
     if st.session_state.active_modal_idx is not None:
         show_response_modal(st.session_state.active_modal_idx)
 
@@ -668,7 +764,6 @@ def main():
         with st.chat_message("user"):
             st.markdown(query)
 
-        # Create empty modal entry
         modal_idx = len(st.session_state.modal_data)
 
         st.session_state.modal_data.append({
