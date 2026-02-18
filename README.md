@@ -34,7 +34,7 @@ data/
 ### Virus–Host Dataset (`virushostdb.tsv`)
 
 * Virus–host relationships
-* Derived from VirusHostDB (genome.jp)
+* Derived from VirusHostDB ([genome.jp](https://www.genome.jp/virushostdb/)) 
 
 All quantitative results originate strictly from these datasets.
 
@@ -43,7 +43,7 @@ All quantitative results originate strictly from these datasets.
 
 The agent uses a controlled tool-calling loop powered by a local LLM via Ollama.
 
-### Core Components
+### tools:
 
 #### `query_dataframe`
 
