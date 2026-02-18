@@ -559,8 +559,8 @@ def show_response_modal(modal_idx):
 
 
 def main():
-    st.set_page_config(page_title=PAGE_TITLE, page_icon="🦠", layout="wide")
-    st.title(PAGE_TITLE)
+    st.set_page_config(page_icon="🦠", layout="wide")
+    st.title("Welcome PRABI :) ")
     st.markdown(
         """
         <style>
@@ -598,7 +598,7 @@ def main():
 
 
     with st.sidebar:
-        st.markdown("### Virus AI Agent")
+        st.header("Virus Dataset AI Agent 🦠 ")
         st.caption(
             """
             Explore viral taxonomy with AI-assisted analysis. 
@@ -609,7 +609,7 @@ def main():
         # ==================== AGENT PARAMETERS ==================== #
         st.markdown("---")
         
-        st.subheader("⚙️ Agent Parameters")
+        st.subheader("Agent Parameters :")
 
         try:
             response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
@@ -639,7 +639,7 @@ def main():
         default_index = next((i for i, model in enumerate(
             model_names) if model.startswith("gpt-oss")), 0)
         model = st.selectbox(
-            "🤖 LLM Model",
+            "LLM Model",
             options=model_names,
             index=default_index,
             help="Model for agentic reasoning (Be sure to select a model able to use tools)"
