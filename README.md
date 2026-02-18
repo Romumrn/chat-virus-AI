@@ -1,8 +1,8 @@
 # 🦠 Virus Dataset AI Agent
 
-## 🌍 Project Context
+## Project Context
 
-This project is developed within the framework of **SHAPE-Med@Lyon** and contributes to the structuring research initiative **Virome@tlas**.
+This project is developed within the framework of **SHAPE-Med@Lyon** and contributes to the structuring research initiative [**Virome@tlas**](https://www.shape-med-lyon.fr/projets/structurants-vague-1/virometlas/).
 
 *Virome@tlas* aims to build an integrated digital platform for large-scale exploration and surveillance of the global virosphere. The project leverages publicly available sequencing data to analyze virus diversity, virus–host interactions, and ecological distribution patterns within a transdisciplinary **One Health** framework spanning human, animal, and environmental health.
 
@@ -15,22 +15,7 @@ The Virus Dataset AI Agent supports this effort by providing a controlled, repro
 
 By constraining the language model to explicit data sources and documented tool calls, the system aims to reduce hallucination risk while preserving interpretability and scientific traceability.
 
-
-## Goal
-
-Large language models can assist biological research, but they are prone to hallucination and unsupported claims.
-This project implements a **tool-restricted agent architecture** that enforces:
-
-* Deterministic dataset querying
-* Transparent visualization generation
-* Controlled external knowledge retrieval
-* Strict grounding of all biological statements
-
-The goal is to provide a **research companion interface** that preserves scientific reliability while enabling natural language exploration.
-
----
-
-## 🧬 Data Sources
+##  Data Sources
 
 The system operates on structured viral datasets:
 
@@ -53,15 +38,14 @@ data/
 
 All quantitative results originate strictly from these datasets.
 
----
 
-## 🧠 Agent Architecture
+## Agent Architecture
 
 The agent uses a controlled tool-calling loop powered by a local LLM via Ollama.
 
 ### Core Components
 
-#### 1`query_dataframe`
+#### `query_dataframe`
 
 Executes validated pandas code on the dataset.
 
@@ -90,7 +74,7 @@ Retrieves biological summaries from Wikipedia.
 
 ##  Scientific Constraints
 
-The assistant operates under strict rules:
+The AI operates under strict rules trought the prompt and parameters:
 
 * No invention of taxa, species counts, or biological claims
 * No use of implicit or hidden knowledge
@@ -105,7 +89,6 @@ The assistant operates under strict rules:
 
 This constraint framework is designed to reduce hallucination risk and increase reproducibility.
 
----
 
 ##  Capabilities
 
@@ -116,8 +99,7 @@ This constraint framework is designed to reduce hallucination risk and increase 
 * Interactive Plotly visualizations
 * Virus–host relationship exploration
 * Explicit source documentation
-
----
+* and more ...
 
 ## Local Execution
 
@@ -131,13 +113,13 @@ The system runs entirely locally:
 This enables reproducibility and data control in research environments.
 
 
-## ⚙️ Installation
+## Installation
 
 ### Requirements
 
 * Python 3.9+
 * Ollama installed and running
-* A tool-capable model (e.g., `gpt-oss`)
+* A tool-capable model (e.g., `gpt-oss`, check ollama webpage tools )
 * Python packages:
 
   * streamlit
@@ -147,24 +129,15 @@ This enables reproducibility and data control in research environments.
   * plotly
 
 
-### Install Dependencies
+### Commands
 
 ```bash
 pip install streamlit pandas numpy requests plotly
-```
 
-### Pull a Model
-
-```bash
+# Pull a Model
 ollama pull gpt-oss
-```
 
-Ensure the selected model supports tool calling.
-
-
-### Run the Application
-
-```bash
+# Run the Application
 streamlit run app.py
 ```
 
@@ -177,7 +150,6 @@ streamlit run app.py
 * “Show a pie chart of genus distribution in Poxviridae”
 * “Give me hosts of Orthopoxvirus Abatino”
 
----
 
 ## Transparency & Reproducibility
 
