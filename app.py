@@ -3,6 +3,8 @@ import streamlit as st
 import pandas as pd
 import requests
 import os
+import logging
+from datetime import datetime
 from tools import wikipedia_search, query_dataframe, create_visualization, TOOLS_SPEC
 
 # ==================== CONSTANTS ==================== #
@@ -18,6 +20,51 @@ DEFAULT_SEED = 42
 DEFAULT_MAX_TOOL_CALLS = 7
 DEFAULT_PREVIEW_ROWS = 50
 DEFAULT_WIKIPEDIA_LIMIT = 5000
+
+
+# ==================== LOGGER SETUP ==================== #
+
+def setup_logger():
+    os.makedirs("logs", exist_ok=True)
+    log_filename = f"logs/agent_{datetime.now().strftime('%Y-%m')}.log"
+
+    logger = logging.getLogger("virus_agent")
+    if logger.handlers:
+        return logger  # évite les doublons si Streamlit recharge le module
+
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    file_handler = logging.FileHandler(log_filename, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    return logger
+
+logger = setup_logger()
+
+
+# ==================== PASSWORD ==================== #
+
+def check_password():
+    if st.session_state.get("authenticated"):
+        return
+
+    st.title("🔐 Access Required")
+    pwd = st.text_input("Enter access code", type="password")
+    if st.button("Login"):
+        if pwd == st.secrets.get("ACCESS_CODE", ""):
+            st.session_state.authenticated = True
+            logger.info("AUTH | Login successful")
+            st.rerun()
+        else:
+            logger.warning("AUTH | Failed login attempt")
+            st.error("Invalid access code")
+    st.stop()
 
 
 # ==================== DATA LOADING ==================== #
@@ -102,9 +149,10 @@ CRITICAL:
     used_sources, used_wikipedia_urls, executed_codes, generated_figures = set(), [], [], []
     tool_call_count = 0
 
-    print( "========= USER Question =========")
-    print( f"**Active config** — temp `{temperature}` · top_p `{top_p}` ·  penalty `{repeat_penalty}` · seed `{seed}` ·  max calls `{max_tool_calls}` · preview `{preview_rows}` rows")
-    print( "Question : ", user_query )
+    logger.info("=" * 50)
+    logger.info(f"USER_QUERY | {user_query}")
+    logger.info(f"CONFIG | temp={temperature} top_p={top_p} penalty={repeat_penalty} seed={seed} max_calls={max_tool_calls} preview={preview_rows}rows")
+
     while True:
         r = requests.post(
             f"{OLLAMA_BASE_URL}/api/chat",
@@ -117,31 +165,29 @@ CRITICAL:
         r.raise_for_status()
         msg = r.json()["message"]
 
-        try:
-            print("thinking : ", msg['thinking'], "\n" )
-        except:
-            pass
-        
-        # CONDITION d4Arret 
+        if thinking := msg.get("thinking"):
+            logger.info(f"THINKING | {thinking[:300]}{'...' if len(thinking) > 300 else ''}")
+
+        # CONDITION d'Arrêt
         if "tool_calls" not in msg:
             messages.append(msg)
-            print( "RESULT :", msg["content"] )
+            logger.info(f"RESULT | {msg['content'][:500]}{'...' if len(msg['content']) > 500 else ''}")
             return msg["content"], generated_figures, used_sources, used_wikipedia_urls, executed_codes
 
         messages.append({"role": "assistant", "content": "", "tool_calls": msg["tool_calls"]})
 
         if tool_call_count >= max_tool_calls:
-            print( "MAX CALL")
+            logger.warning(f"MAX_TOOL_CALLS | Limit reached ({max_tool_calls}), forcing final answer")
             messages.append({
                 "role": "system",
                 "content": f"Tool call limit reached ({max_tool_calls}). Synthesize a final answer to: '{user_query}'"
             })
-            
+
         for call in msg["tool_calls"]:
-            print("Tool call : ", call, "\n" )
             tool_call_count += 1
             name = call["function"]["name"]
             args = call["function"]["arguments"]
+            logger.info(f"TOOL_CALL #{tool_call_count} | {name} | args={args}")
 
             if name == "wikipedia_search":
                 output = wikipedia_search(**args, wikipedia_limit=wikipedia_limit)
@@ -149,8 +195,10 @@ CRITICAL:
                     used_sources.add("Wikipedia")
                     used_wikipedia_urls.append(output["url"])
                     content = f"**{output['title']}**\n\n{output['extract']}\n\n🔗 {output['url']}"
+                    logger.info(f"TOOL_OK | wikipedia_search | {output['url']}")
                 else:
                     content = output["message"]
+                    logger.warning(f"TOOL_FAIL | wikipedia_search | {output['message']}")
 
             elif name == "query_dataframe":
                 output = query_dataframe(args["code"], df_taxo, df_host, preview_rows=preview_rows)
@@ -158,8 +206,10 @@ CRITICAL:
                     executed_codes.append(args["code"])
                     used_sources.add("Dataset query")
                     content = f"Query OK. Shape: {output['shape']}\nColumns: {', '.join(output['columns'])}\n{output['preview']}"
+                    logger.info(f"TOOL_OK | query_dataframe | shape={output['shape']}")
                 else:
                     content = f"Error:\n{output['message']}"
+                    logger.warning(f"TOOL_FAIL | query_dataframe | {output['message']}")
 
             elif name == "create_visualization":
                 output = create_visualization(args["code"], df_taxo, df_host)
@@ -168,21 +218,27 @@ CRITICAL:
                     used_sources.add("Dataset visualization")
                     generated_figures.append(output["figure"])
                     content = "Visualization created successfully."
+                    logger.info("TOOL_OK | create_visualization")
                 else:
                     content = f"Error:\n{output['message']}"
+                    logger.warning(f"TOOL_FAIL | create_visualization | {output['message']}")
 
             else:
                 content = f"Unknown tool: {name}"
+                logger.error(f"UNKNOWN_TOOL | {name}")
 
             messages.append({"role": "tool", "tool_call_id": call["id"], "name": name, "content": content})
-
-
 
 
 # ==================== MAIN ==================== #
 
 def main():
     st.set_page_config(page_icon="🦠", layout="wide")
+
+    # ── Password (activé via secrets.toml : PASSWORD_ENABLED = true) ──
+    if st.secrets.get("PASSWORD_ENABLED", False):
+        check_password()
+
     st.title("Welcome PRABI :) ")
     st.markdown(
         """
@@ -213,10 +269,10 @@ def main():
         - Double-check that your question is scientifically accurate
 
         Example questions:   
-        - “Give me information about Orthopoxvirus. Is it a family or a genus? How many species does it include?”
-        - “I want more information about polyomavirus”
-        - “Show a pie chart of genus distribution within Poxviridae.”
-        - “What are the known hosts of Orthopoxvirus Abatino?”     
+        - "Give me information about Orthopoxvirus. Is it a family or a genus? How many species does it include?"
+        - "I want more information about polyomavirus"
+        - "Show a pie chart of genus distribution within Poxviridae."
+        - "What are the known hosts of Orthopoxvirus Abatino?"     
          
     """)
 
@@ -241,7 +297,7 @@ You have access to curated viral databases, including:
 Additional databases will be integrated soon and it will be amazing !
 """
         )
-         
+
         st.header("Settings")
 
         try:
@@ -269,7 +325,6 @@ Additional databases will be integrated soon and it will be amazing !
             model = st.selectbox("LLM Model", options=model_names, index=default_index,
                                 help="Select a model able to use tools")
 
-        
             st.markdown("**Sampling**")
             temperature    = st.slider("Temperature",    0.0, 2.0,   DEFAULT_TEMPERATURE,    0.05)
             top_p          = st.slider("Top-p",          0.0, 1.0,   DEFAULT_TOP_P,          0.05)
@@ -281,11 +336,6 @@ Additional databases will be integrated soon and it will be amazing !
             wikipedia_limit = st.slider("Wiki limit",      500, 20000, DEFAULT_WIKIPEDIA_LIMIT, 500)
 
         st.markdown("---")
-        # st.markdown(
-        #     f"**Active config** — temp `{temperature}` · top_p `{top_p}` · "
-        #     f"penalty `{repeat_penalty}` · seed `{seed}` · "
-        #     f"max calls `{max_tool_calls}` · preview `{preview_rows}` rows"
-        # )
         st.caption("🔗 GitHub: https://github.com/Romumrn/chat-virus-AI")
 
 
@@ -338,7 +388,7 @@ Additional databases will be integrated soon and it will be amazing !
             st.markdown(answer)
             for fig in figures:
                 st.plotly_chart(fig, width='stretch')
-                
+
             if wikipedia_urls or executed_codes:
                 with st.expander("📚 Sources"):
                     if wikipedia_urls:
@@ -346,7 +396,7 @@ Additional databases will be integrated soon and it will be amazing !
                         for url in wikipedia_urls:
                             title = url.split('/')[-1].replace('_', ' ')
                             st.markdown(f"- [{title}]({url})")
-                    
+
                     if executed_codes:
                         st.markdown("**📊 Dataset Query & Visualization**")
                         full_code = "\n\n---\n\n".join(
@@ -354,7 +404,6 @@ Additional databases will be integrated soon and it will be amazing !
                             for i, code in enumerate(executed_codes, 1)
                         )
                         st.code(full_code, language="python")
-
 
         st.session_state.messages.append({
             "role": "assistant",
