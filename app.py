@@ -33,7 +33,8 @@ def setup_logger():
         return logger  # évite les doublons si Streamlit recharge le module
 
     logger.setLevel(logging.INFO)
-    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
     file_handler = logging.FileHandler(log_filename, encoding="utf-8")
     file_handler.setFormatter(formatter)
@@ -44,6 +45,7 @@ def setup_logger():
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
     return logger
+
 
 logger = setup_logger()
 
@@ -74,6 +76,7 @@ def load_dataframe(path):
     if not os.path.exists(path):
         return None
     return pd.read_csv(path)
+
 
 @st.cache_data(show_spinner=False)
 def load_host_dataframe(path):
@@ -146,12 +149,14 @@ CRITICAL:
         {"role": "user", "content": user_query}
     ]
 
-    used_sources, used_wikipedia_urls, executed_codes, generated_figures = set(), [], [], []
+    used_sources, used_wikipedia_urls, executed_codes, generated_figures = set(), [
+    ], [], []
     tool_call_count = 0
 
     logger.info("=" * 50)
     logger.info(f"USER_QUERY | {user_query}")
-    logger.info(f"CONFIG | temp={temperature} top_p={top_p} penalty={repeat_penalty} seed={seed} max_calls={max_tool_calls} preview={preview_rows}rows")
+    logger.info(
+        f"CONFIG | temp={temperature} top_p={top_p} penalty={repeat_penalty} seed={seed} max_calls={max_tool_calls} preview={preview_rows}rows")
 
     while True:
         r = requests.post(
@@ -166,18 +171,22 @@ CRITICAL:
         msg = r.json()["message"]
 
         if thinking := msg.get("thinking"):
-            logger.info(f"THINKING | {thinking[:300]}{'...' if len(thinking) > 300 else ''}")
+            logger.info(
+                f"THINKING | {thinking[:300]}{'...' if len(thinking) > 300 else ''}")
 
         # CONDITION d'Arrêt
         if "tool_calls" not in msg:
             messages.append(msg)
-            logger.info(f"RESULT | {msg['content'][:500]}{'...' if len(msg['content']) > 500 else ''}")
+            logger.info(
+                f"RESULT | {msg['content'][:500]}{'...' if len(msg['content']) > 500 else ''}")
             return msg["content"], generated_figures, used_sources, used_wikipedia_urls, executed_codes
 
-        messages.append({"role": "assistant", "content": "", "tool_calls": msg["tool_calls"]})
+        messages.append({"role": "assistant", "content": "",
+                        "tool_calls": msg["tool_calls"]})
 
         if tool_call_count >= max_tool_calls:
-            logger.warning(f"MAX_TOOL_CALLS | Limit reached ({max_tool_calls}), forcing final answer")
+            logger.warning(
+                f"MAX_TOOL_CALLS | Limit reached ({max_tool_calls}), forcing final answer")
             messages.append({
                 "role": "system",
                 "content": f"Tool call limit reached ({max_tool_calls}). Synthesize a final answer to: '{user_query}'"
@@ -190,26 +199,32 @@ CRITICAL:
             logger.info(f"TOOL_CALL #{tool_call_count} | {name} | args={args}")
 
             if name == "wikipedia_search":
-                output = wikipedia_search(**args, wikipedia_limit=wikipedia_limit)
+                output = wikipedia_search(
+                    **args, wikipedia_limit=wikipedia_limit)
                 if output["success"]:
                     used_sources.add("Wikipedia")
                     used_wikipedia_urls.append(output["url"])
                     content = f"**{output['title']}**\n\n{output['extract']}\n\n🔗 {output['url']}"
-                    logger.info(f"TOOL_OK | wikipedia_search | {output['url']}")
+                    logger.info(
+                        f"TOOL_OK | wikipedia_search | {output['url']}")
                 else:
                     content = output["message"]
-                    logger.warning(f"TOOL_FAIL | wikipedia_search | {output['message']}")
+                    logger.warning(
+                        f"TOOL_FAIL | wikipedia_search | {output['message']}")
 
             elif name == "query_dataframe":
-                output = query_dataframe(args["code"], df_taxo, df_host, preview_rows=preview_rows)
+                output = query_dataframe(
+                    args["code"], df_taxo, df_host, preview_rows=preview_rows)
                 if output["success"]:
                     executed_codes.append(args["code"])
                     used_sources.add("Dataset query")
                     content = f"Query OK. Shape: {output['shape']}\nColumns: {', '.join(output['columns'])}\n{output['preview']}"
-                    logger.info(f"TOOL_OK | query_dataframe | shape={output['shape']}")
+                    logger.info(
+                        f"TOOL_OK | query_dataframe | shape={output['shape']}")
                 else:
                     content = f"Error:\n{output['message']}"
-                    logger.warning(f"TOOL_FAIL | query_dataframe | {output['message']}")
+                    logger.warning(
+                        f"TOOL_FAIL | query_dataframe | {output['message']}")
 
             elif name == "create_visualization":
                 output = create_visualization(args["code"], df_taxo, df_host)
@@ -221,13 +236,15 @@ CRITICAL:
                     logger.info("TOOL_OK | create_visualization")
                 else:
                     content = f"Error:\n{output['message']}"
-                    logger.warning(f"TOOL_FAIL | create_visualization | {output['message']}")
+                    logger.warning(
+                        f"TOOL_FAIL | create_visualization | {output['message']}")
 
             else:
                 content = f"Unknown tool: {name}"
                 logger.error(f"UNKNOWN_TOOL | {name}")
 
-            messages.append({"role": "tool", "tool_call_id": call["id"], "name": name, "content": content})
+            messages.append(
+                {"role": "tool", "tool_call_id": call["id"], "name": name, "content": content})
 
 
 # ==================== MAIN ==================== #
@@ -315,40 +332,52 @@ Additional databases will be integrated soon and it will be amazing !
             st.error("Required dataset not found")
             st.stop()
 
-        model_names = [m["name"] for m in requests.get(f"{OLLAMA_BASE_URL}/api/tags").json().get("models", [])]
+        model_names = [m["name"] for m in requests.get(
+            f"{OLLAMA_BASE_URL}/api/tags").json().get("models", [])]
         if not model_names:
             st.error("No models available in Ollama")
             st.stop()
 
         with st.expander("⚙️ Expert mode", expanded=False):
-            default_index = next((i for i, m in enumerate(model_names) if m.startswith("gpt-oss")), 0)
+            default_index = next((i for i, m in enumerate(
+                model_names) if m.startswith("gpt-oss")), 0)
             model = st.selectbox("LLM Model", options=model_names, index=default_index,
-                                help="Select a model able to use tools")
+                                 help="Select a model able to use tools")
 
             st.markdown("**Sampling**")
-            temperature    = st.slider("Temperature",    0.0, 2.0,   DEFAULT_TEMPERATURE,    0.05)
-            top_p          = st.slider("Top-p",          0.0, 1.0,   DEFAULT_TOP_P,          0.05)
-            repeat_penalty = st.slider("Repeat penalty", 0.5, 2.0,   DEFAULT_REPEAT_PENALTY, 0.05)
-            seed           = st.number_input("Seed", min_value=-1, max_value=99999, value=DEFAULT_SEED, step=1)
+            temperature = st.slider(
+                "Temperature",    0.0, 2.0,   DEFAULT_TEMPERATURE,    0.05)
+            top_p = st.slider("Top-p",          0.0, 1.0,
+                              DEFAULT_TOP_P,          0.05)
+            repeat_penalty = st.slider(
+                "Repeat penalty", 0.5, 2.0,   DEFAULT_REPEAT_PENALTY, 0.05)
+            seed = st.number_input("Seed", min_value=-1,
+                                   max_value=99999, value=DEFAULT_SEED, step=1)
             st.markdown("**Agent**")
-            max_tool_calls  = st.slider("Max tool calls",  1,   20,    DEFAULT_MAX_TOOL_CALLS)
-            preview_rows    = st.slider("Preview rows",    5,   200,   DEFAULT_PREVIEW_ROWS,   5)
-            wikipedia_limit = st.slider("Wiki limit",      500, 20000, DEFAULT_WIKIPEDIA_LIMIT, 500)
+            max_tool_calls = st.slider(
+                "Max tool calls",  1,   20,    DEFAULT_MAX_TOOL_CALLS)
+            preview_rows = st.slider(
+                "Preview rows",    5,   200,   DEFAULT_PREVIEW_ROWS,   5)
+            wikipedia_limit = st.slider(
+                "Wiki limit",      500, 20000, DEFAULT_WIKIPEDIA_LIMIT, 500)
 
         st.markdown("---")
         st.caption("🔗 GitHub: https://github.com/Romumrn/chat-virus-AI")
-
 
     # ── Session state ──
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
     # ── Chat display ──
-    for msg in st.session_state.messages:
+    for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-            for fig in msg.get("figures", []):
-                st.plotly_chart(fig, width='stretch')
+
+            # Figures avec clés uniques basées sur l'index du message et de la figure
+            for fig_idx, fig in enumerate(msg.get("figures", [])):
+                unique_key = f"chat_history_{msg_idx}_{fig_idx}_{hash(str(fig.data))}"
+                st.plotly_chart(fig, use_container_width=True, key=unique_key,config={'displayModeBar': True})
+
             if msg.get("wikipedia_urls") or msg.get("executed_codes"):
                 with st.expander("📚 Sources"):
                     if msg.get("wikipedia_urls"):
@@ -366,7 +395,8 @@ Additional databases will be integrated soon and it will be amazing !
 
     # ── Chat input ──
     if query := st.chat_input("Ask about viruses..."):
-        st.session_state.messages.append({"role": "user", "content": query})
+        st.session_state.messages.append(
+            {"role": "user", "content": query})
         with st.chat_message("user"):
             st.markdown(query)
 
@@ -385,9 +415,15 @@ Additional databases will be integrated soon and it will be amazing !
                     preview_rows=preview_rows,
                     wikipedia_limit=wikipedia_limit,
                 )
+
             st.markdown(answer)
-            for fig in figures:
-                st.plotly_chart(fig, width='stretch')
+
+            # CORRECTION : Générer des clés uniques pour chaque figure
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+            for fig_idx, fig in enumerate(figures):
+                unique_key = f"new_response_{timestamp}_{fig_idx}_{hash(str(fig.data))}"
+                st.plotly_chart(
+                    fig, use_container_width=True, key=unique_key, config={'displayModeBar': True})
 
             if wikipedia_urls or executed_codes:
                 with st.expander("📚 Sources"):
@@ -414,7 +450,8 @@ Additional databases will be integrated soon and it will be amazing !
         })
 
     st.markdown("---")
-    st.caption("⚠️ **AI is not magic** — Results may contain errors and should be verified for scientific or medical use.")
+    st.caption(
+        "⚠️ **AI is not magic** — Results may contain errors and should be verified for scientific or medical use.")
 
 
 if __name__ == "__main__":
