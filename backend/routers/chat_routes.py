@@ -15,7 +15,7 @@ import json
 import os
 
 import plotly.io as pio
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 import db
@@ -25,6 +25,7 @@ from config import (
 )
 from backend import auth
 from backend.agent import run_agent
+from backend.albert import transcribe_audio
 from backend.schemas import ChatIn
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -47,6 +48,19 @@ def _sse(event: dict) -> str:
 def _title_from(text: str) -> str:
     t = " ".join((text or "").strip().split())
     return (t[:48] + "…") if len(t) > 48 else (t or "New conversation")
+
+
+@router.post("/transcribe")
+async def transcribe(file: UploadFile, user: dict = Depends(auth.get_current_user)):
+    api_key = _api_key()
+    audio_bytes = await file.read()
+    text = transcribe_audio(audio_bytes, api_key)
+    if not text:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Could not transcribe the recording — please try again or type your question.",
+        )
+    return {"text": text}
 
 
 @router.post("/chat")

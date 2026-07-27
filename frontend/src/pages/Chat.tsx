@@ -14,6 +14,8 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Mic,
+  Square,
 } from "lucide-react";
 import { api, type Conversation, type ChatMessage } from "@/lib/api";
 import { streamChat, type AgentEvent } from "@/lib/sse";
@@ -51,6 +53,12 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+
+  // Voice input: record a short clip and transcribe it via the backend.
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
   // Live activity for the in-flight turn.
   const [status, setStatus] = useState("");
@@ -201,6 +209,45 @@ export default function Chat() {
       e.preventDefault();
       send();
     }
+  }
+
+  async function startRecording() {
+    if (recording || streaming || transcribing) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        setTranscribing(true);
+        try {
+          const { text } = await api.postFile<{ text: string }>(
+            "/api/transcribe",
+            blob,
+            "recording.webm",
+          );
+          if (text) send(text);
+        } catch {
+          // transcription failed server-side — let the user type instead
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch {
+      // mic permission denied or unavailable — silently no-op, user can type
+    }
+  }
+
+  function stopRecording() {
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
   }
 
   return (
@@ -375,11 +422,27 @@ export default function Chat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="Ask about a virus, host, or dataset…"
+              placeholder={recording ? "Recording… speak your question" : "Ask about a virus, host, or dataset…"}
               rows={1}
               className="max-h-40 min-h-[2.5rem] flex-1 resize-none"
-              disabled={streaming}
+              disabled={streaming || recording || transcribing}
             />
+            <Button
+              variant={recording ? "primary" : "outline"}
+              size="icon"
+              onClick={() => (recording ? stopRecording() : startRecording())}
+              disabled={streaming || transcribing}
+              title={recording ? "Stop recording" : "Ask by voice"}
+              className={recording ? "animate-pulse" : undefined}
+            >
+              {transcribing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : recording ? (
+                <Square className="h-4 w-4" />
+              ) : (
+                <Mic className="h-4 w-4" />
+              )}
+            </Button>
             <Button size="icon" onClick={() => send()} disabled={streaming || !input.trim()}>
               {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>

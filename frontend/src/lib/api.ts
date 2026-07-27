@@ -82,6 +82,14 @@ export const api = {
 
   del: <T>(path: string) =>
     fetch(path, { method: "DELETE", headers: authHeaders() }).then((r) => handle<T>(r)),
+
+  postFile: <T>(path: string, file: Blob, filename: string) => {
+    const form = new FormData();
+    form.append("file", file, filename);
+    return fetch(path, { method: "POST", headers: authHeaders(), body: form }).then((r) =>
+      handle<T>(r),
+    );
+  },
 };
 
 // ── Types mirrored from backend/schemas.py ───────────────────────────────────
