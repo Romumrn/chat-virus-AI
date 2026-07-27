@@ -13,6 +13,7 @@ import {
   LogOut,
   Moon,
   Sun,
+  Info as InfoIcon,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Badge, Button } from "@/components/ui";
@@ -29,6 +30,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: "/", label: "Chat", icon: MessageSquare },
   { to: "/account", label: "My account", icon: UserIcon },
+  { to: "/info", label: "Info", icon: InfoIcon },
   { to: "/dev", label: "Developer", icon: Wrench, min: "dev" },
   { to: "/admin", label: "Administration", icon: Shield, min: "admin" },
 ];

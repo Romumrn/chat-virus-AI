@@ -5,6 +5,7 @@ import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import Chat from "@/pages/Chat";
+import Info from "@/pages/Info";
 import Account from "@/pages/Account";
 import Admin from "@/pages/Admin";
 import Dev from "@/pages/Dev";
@@ -40,6 +41,7 @@ export default function App() {
       >
         <Route path="/" element={<Chat />} />
         <Route path="/account" element={<Account />} />
+        <Route path="/info" element={<Info />} />
         <Route
           path="/dev"
           element={
