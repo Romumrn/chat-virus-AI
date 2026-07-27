@@ -357,6 +357,9 @@ export default function Chat() {
 
         {/* Composer */}
         <div className="border-t border-border p-4">
+          <p className="mb-2 text-center text-xs text-muted-foreground">
+            ⚠️ AI is not magic — Results may contain errors and should be verified for scientific or medical use.
+          </p>
           <div className="flex items-end gap-2">
             {isExpert && (
               <Button

@@ -19,13 +19,14 @@ export default function PlotlyFigure({ figure }: { figure: any }) {
     plot_bgcolor: "rgba(0,0,0,0)",
     font: { color: isDark ? "#e5e7eb" : "#111827" },
     margin: { t: 40, r: 20, b: 40, l: 50, ...(figure.layout?.margin || {}) },
+    modebar: { orientation: "h", ...(figure.layout?.modebar || {}) },
   };
   return (
     <div className="my-3 overflow-x-auto rounded-lg border border-border p-2">
       <Plot
         data={figure.data || []}
         layout={layout}
-        config={{ responsive: true, displaylogo: false }}
+        config={{ responsive: true, displaylogo: false, scrollZoom: true }}
         style={{ width: "100%", height: "400px" }}
         useResizeHandler
       />
