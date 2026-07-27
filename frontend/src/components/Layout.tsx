@@ -86,6 +86,7 @@ export default function Layout() {
         </nav>
         <div className="border-t border-border p-3 text-xs text-muted-foreground">
           Viromech@t · SHAPE-Med@Lyon
+          ![Repo](https://github.com/Romumrn/viromechat)
         </div>
       </aside>
 

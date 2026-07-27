@@ -12,6 +12,9 @@ import {
   Sliders,
   Loader2,
   MessageSquare,
+  Info,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { api, type Conversation, type ChatMessage } from "@/lib/api";
 import { streamChat, type AgentEvent } from "@/lib/sse";
@@ -20,6 +23,7 @@ import { Button, Card, Input, Select, Textarea } from "@/components/ui";
 import MessageBubble from "@/components/chat/MessageBubble";
 import PlotlyFigure from "@/components/chat/PlotlyFigure";
 import Welcome from "@/components/chat/Welcome";
+import DatasetsInfo from "@/components/chat/DatasetsInfo";
 import { cn } from "@/lib/utils";
 
 interface LiveTool {
@@ -40,6 +44,10 @@ interface Expert {
 export default function Chat() {
   const { user, hasRole } = useAuth();
   const isExpert = hasRole("dev");
+
+  // Left column: collapsible, with two tabs (conversation history / info).
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<"chats" | "info">("chats");
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -200,39 +208,84 @@ export default function Chat() {
 
   return (
     <div className="flex h-full">
-      {/* Conversation list */}
-      <div className="flex w-64 shrink-0 flex-col border-r border-border bg-card">
-        <div className="p-3">
-          <Button className="w-full" onClick={newConversation}>
-            <Plus className="h-4 w-4" /> New chat
-          </Button>
-        </div>
-        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-2">
-          {conversations.map((c) => (
-            <div
-              key={c.id}
-              onClick={() => openConversation(c.id)}
+      {/* Left column — collapsible, with Chats / Info tabs */}
+      {sidebarOpen ? (
+        <div className="flex w-64 shrink-0 flex-col border-r border-border bg-card">
+          {/* Tab bar + collapse toggle */}
+          <div className="flex items-center gap-1 border-b border-border p-2">
+            <button
+              onClick={() => setSidebarTab("chats")}
               className={cn(
-                "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm",
-                activeId === c.id ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+                "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium",
+                sidebarTab === "chats" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50",
               )}
             >
-              <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate">{c.title || "Untitled"}</span>
-              <button
-                onClick={(e) => deleteConversation(c.id, e)}
-                className="opacity-0 group-hover:opacity-100"
-                title="Delete"
-              >
-                <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-              </button>
+              <MessageSquare className="h-4 w-4" /> Chats
+            </button>
+            <button
+              onClick={() => setSidebarTab("info")}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium",
+                sidebarTab === "info" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50",
+              )}
+            >
+              <Info className="h-4 w-4" /> Info
+            </button>
+            <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(false)} title="Collapse">
+              <PanelLeftClose className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {sidebarTab === "chats" ? (
+            <>
+              <div className="p-3">
+                <Button className="w-full" onClick={newConversation}>
+                  <Plus className="h-4 w-4" /> New chat
+                </Button>
+              </div>
+              <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-2">
+                {conversations.map((c) => (
+                  <div
+                    key={c.id}
+                    onClick={() => openConversation(c.id)}
+                    className={cn(
+                      "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm",
+                      activeId === c.id ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+                    )}
+                  >
+                    <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate">{c.title || "Untitled"}</span>
+                    <button
+                      onClick={(e) => deleteConversation(c.id, e)}
+                      className="opacity-0 group-hover:opacity-100"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+                    </button>
+                  </div>
+                ))}
+                {conversations.length === 0 && (
+                  <p className="px-2 py-4 text-center text-sm text-muted-foreground">No conversations yet</p>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <DatasetsInfo />
             </div>
-          ))}
-          {conversations.length === 0 && (
-            <p className="px-2 py-4 text-center text-sm text-muted-foreground">No conversations yet</p>
           )}
         </div>
-      </div>
+      ) : (
+        // Collapsed rail: just the expand toggle + a quick new-chat button.
+        <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-r border-border bg-card py-2">
+          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)} title="Expand sidebar">
+            <PanelLeftOpen className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={newConversation} title="New chat">
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
 
       {/* Chat area */}
       <div className="flex min-w-0 flex-1 flex-col">

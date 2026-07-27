@@ -4,7 +4,7 @@
  * panel describing the Virome@tlas datasets and tools. Clicking an example
  * sends it straight away.
  */
-import { Lightbulb, Sparkles, Database, Wrench } from "lucide-react";
+import { Lightbulb, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui";
 
 const TIPS = [
@@ -78,35 +78,9 @@ export default function Welcome({
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-2">
-        <Card className="p-5">
-          <div className="flex items-center gap-2 font-medium">
-            <Database className="h-4 w-4 text-primary" /> Datasets
-          </div>
-          <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
-            <li>
-              <span className="font-medium text-foreground">Taxonomy</span> — NCBI
-              Taxonomy, enriched with genome assembly availability, SRA sequencing
-              activity, and GBIF biodiversity observations.
-            </li>
-            <li>
-              <span className="font-medium text-foreground">Virus-host occurrences</span> —
-              SRA/GenBank/BioSample samples linked to host &amp; virus taxonomy,
-              geographic location, and disease status.
-            </li>
-          </ul>
-        </Card>
-        <Card className="p-5">
-          <div className="flex items-center gap-2 font-medium">
-            <Wrench className="h-4 w-4 text-primary" /> Tools
-          </div>
-          <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-            <li className="flex gap-2"><span className="text-primary">•</span> SQL &amp; pandas queries over both datasets</li>
-            <li className="flex gap-2"><span className="text-primary">•</span> Interactive maps and charts</li>
-            <li className="flex gap-2"><span className="text-primary">•</span> Wikipedia &amp; PubMed search for biological background</li>
-          </ul>
-        </Card>
-      </div>
+      <p className="mt-6 text-center text-xs text-muted-foreground">
+        See the <span className="font-medium">Info</span> tab in the sidebar for the datasets and tools available.
+      </p>
     </div>
   );
 }
