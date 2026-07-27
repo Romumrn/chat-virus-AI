@@ -19,6 +19,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Button, Card, Input, Select, Textarea } from "@/components/ui";
 import MessageBubble from "@/components/chat/MessageBubble";
 import PlotlyFigure from "@/components/chat/PlotlyFigure";
+import Welcome from "@/components/chat/Welcome";
 import { cn } from "@/lib/utils";
 
 interface LiveTool {
@@ -37,7 +38,7 @@ interface Expert {
 }
 
 export default function Chat() {
-  const { hasRole } = useAuth();
+  const { user, hasRole } = useAuth();
   const isExpert = hasRole("dev");
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -104,8 +105,8 @@ export default function Chat() {
     setLiveFigures([]);
   }
 
-  async function send() {
-    const text = input.trim();
+  async function send(override?: string) {
+    const text = (override ?? input).trim();
     if (!text || streaming) return;
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
@@ -237,14 +238,7 @@ export default function Chat() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
           {messages.length === 0 && !streaming && (
-            <div className="flex h-full flex-col items-center justify-center text-center text-muted-foreground">
-              <div className="text-5xl">🦠</div>
-              <h2 className="mt-4 text-xl font-medium text-foreground">Ask about viruses</h2>
-              <p className="mt-1 max-w-md text-sm">
-                Query viral taxonomy, hosts, and the literature. Answers are grounded in tools and
-                cite their sources.
-              </p>
-            </div>
+            <Welcome name={user?.first_name || ""} onExample={(q) => send(q)} />
           )}
           {messages.map((m, i) => (
             <MessageBubble key={i} msg={m} />
@@ -357,7 +351,7 @@ export default function Chat() {
               className="max-h-40 min-h-[2.5rem] flex-1 resize-none"
               disabled={streaming}
             />
-            <Button size="icon" onClick={send} disabled={streaming || !input.trim()}>
+            <Button size="icon" onClick={() => send()} disabled={streaming || !input.trim()}>
               {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
           </div>
