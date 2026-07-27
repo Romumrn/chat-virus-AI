@@ -37,11 +37,44 @@ services:
       retries: 10
       start_period: 15s
 
+  # FastAPI backend + built React SPA (one origin). This is the primary
+  # front-end now; it shares the SQLite DB in ./auth_data with the legacy
+  # Streamlit app below, so both can run during the transition.
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: virus-api
+    environment:
+      # Reach the MCP server by its Compose network name, not localhost.
+      - MCP_SERVER_URL=http://mcp:8000/mcp
+      # Serve the SPA from the same origin, so CORS is inert; override if the
+      # front is ever hosted separately.
+      - CORS_ORIGINS=
+    env_file:
+      # ALBERT_API_KEY, JWT_SECRET, ADMIN_EMAILS, REGISTRATION_CODE.
+      # JWT_SECRET MUST be a long random value in production — see .env.app.example.
+      - .env.app
+    volumes:
+      - ./logs:/app/logs
+      # Same host bind-mount as the Streamlit app: the SQLite DB lives at
+      # ./auth_data/viromechat.db. See the note on the app service below.
+      - ./auth_data:/app/auth_data
+    ports:
+      - "8080:8080"
+    depends_on:
+      mcp:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Legacy Streamlit UI — kept for the transition but no longer started by
+  # default. Bring it up explicitly with: docker compose --profile legacy up
   app:
     build:
       context: .
       dockerfile: docker/Dockerfile.app
     container_name: virus-ai-agent
+    profiles: ["legacy"]
     environment:
       - STREAMLIT_BROWSER_GATHERUSAGESTATS=false
       # app.py and server_mcp.py are now separate containers — "localhost"

@@ -38,6 +38,21 @@ USER_HISTORY_DIR  = os.path.join(LOG_DIR, "user_histories")  # legacy per-user c
 DB_PATH = os.path.join("auth_data", "viromechat.db")
 
 
+# ==================== ROLES & AUTH (React/FastAPI API) ==================== #
+# Three roles, ordered by privilege. The FastAPI backend (backend/) enforces
+# these; the legacy Streamlit app only ever used {user, admin}. 'dev' sits in
+# between: full chat + expert mode + MCP/log introspection, but no user admin.
+VALID_ROLES = ("user", "dev", "admin")
+ROLE_LEVEL = {"user": 0, "dev": 1, "admin": 2}
+
+# JWT signing config for the API. JWT_SECRET MUST be set to a long random value
+# in production (env / .env.app) — the default here is only a dev convenience
+# and is intentionally obvious so a misconfigured prod deployment stands out.
+JWT_SECRET      = os.environ.get("JWT_SECRET", "dev-insecure-change-me")
+JWT_ALGORITHM   = "HS256"
+JWT_EXPIRE_MIN  = int(os.environ.get("JWT_EXPIRE_MIN", "720"))  # 12h
+
+
 def _admin_emails() -> set[str]:
     """Emails granted the 'admin' role, from the ADMIN_EMAILS secret/env
     (comma-separated). Read lazily so tests and the app can set it via env.
@@ -68,7 +83,7 @@ def load_env_file(env_path: str) -> None:
 # ── Albert API Configuration ──────────────────────────────────────────────────
 ALBERT_BASE_URL      = "https://albert.api.etalab.gouv.fr/v1"
 ALBERT_TIMEOUT       = 120          # seconds — large models can be slow
-ALBERT_MODEL_DEFAULT = "AgentPublic/gptoss120b"  # fallback if model list fails
+ALBERT_MODEL_DEFAULT = "openai/gpt-oss-120b"  # fallback if model list fails
 ALBERT_WHISPER_MODEL = "openai/whisper-large-v3"  # speech-to-text for the mic input
 
 # The free Albert API is heavily rate-limited (HTTP 429), especially on the

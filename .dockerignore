@@ -13,3 +13,7 @@ __pycache__
 
 logs
 *.ipynb
+
+# Front-end: build fresh inside the image; keep the build context small.
+frontend/node_modules
+frontend/dist

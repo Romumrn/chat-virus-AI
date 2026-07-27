@@ -243,6 +243,49 @@ def list_users_with_counts(conn: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def search_users(conn: sqlite3.Connection, query: str) -> list[dict]:
+    """Same shape as list_users_with_counts, filtered to users whose email or
+    name matches `query` (case-insensitive substring). Empty query → all."""
+    q = (query or "").strip().lower()
+    users = list_users_with_counts(conn)
+    if not q:
+        return users
+    return [
+        u for u in users
+        if q in (u["email"] or "").lower()
+        or q in (u["first_name"] or "").lower()
+        or q in (u["last_name"] or "").lower()
+    ]
+
+
+def delete_user(conn: sqlite3.Connection, email: str) -> None:
+    """Delete a user and — via ON DELETE CASCADE — all their conversations and
+    messages. Admin-only operation (enforced at the API layer)."""
+    with _write_lock:
+        conn.execute("DELETE FROM users WHERE email = ?", (email.lower(),))
+        conn.commit()
+
+
+def get_stats(conn: sqlite3.Connection) -> dict:
+    """Platform-wide counts for the admin dashboard: users per role, plus
+    total conversations and messages."""
+    by_role = {
+        r["role"]: r["n"]
+        for r in conn.execute(
+            "SELECT role, COUNT(*) AS n FROM users GROUP BY role"
+        ).fetchall()
+    }
+    n_users = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+    n_conv = conn.execute("SELECT COUNT(*) AS n FROM conversations").fetchone()["n"]
+    n_msg = conn.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"]
+    return {
+        "users_total": n_users,
+        "users_by_role": by_role,
+        "conversations_total": n_conv,
+        "messages_total": n_msg,
+    }
+
+
 # ==================== CONVERSATIONS ====================
 
 def list_conversations(conn: sqlite3.Connection, email: str) -> list[dict]:
@@ -358,6 +401,26 @@ def list_messages(conn: sqlite3.Connection, conversation_id: int) -> list[dict]:
     for r in rows:
         m = {"role": r["role"], "content": r["content"]}
         m.update(_rehydrate_payload(r["payload_json"]))
+        out.append(m)
+    return out
+
+
+def list_messages_json(conn: sqlite3.Connection, conversation_id: int) -> list[dict]:
+    """Messages in JSON-serializable shape for the REST/React API: identical to
+    list_messages but figures stay as Plotly JSON dicts (parsed from the stored
+    string) instead of Figure objects, so FastAPI can serialize them directly."""
+    rows = conn.execute(
+        "SELECT role, content, payload_json FROM messages WHERE conversation_id = ? ORDER BY id",
+        (conversation_id,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        m = {"role": r["role"], "content": r["content"]}
+        data = json.loads(r["payload_json"]) if r["payload_json"] else {}
+        if "figures" in data:
+            # Stored as Plotly JSON strings; hand back parsed dicts for React.
+            data["figures"] = [json.loads(fj) for fj in data["figures"]]
+        m.update(data)
         out.append(m)
     return out
 

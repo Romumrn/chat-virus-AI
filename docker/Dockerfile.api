@@ -1,0 +1,45 @@
+# FastAPI backend (backend/) + the built React SPA (frontend/) served from the
+# same origin. Talks to Albert API and to server_mcp.py over MCP/HTTP.
+# Build from the repo root: docker build -f docker/Dockerfile.api .
+
+# ── Stage 1: build the React front-end ──────────────────────────────────────
+FROM node:22-slim AS web
+WORKDIR /web
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build   # → /web/dist
+
+# ── Stage 2: Python API image ───────────────────────────────────────────────
+FROM python:3.11-slim
+WORKDIR /app
+
+# gosu : root -> app switch in the entrypoint after fixing bind-mount perms.
+RUN apt-get update && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements/ requirements/
+RUN pip install --no-cache-dir -r requirements/api.txt
+
+# Non-root user with a writable HOME (see Dockerfile.mcp for the rationale).
+RUN addgroup --gid 1000 app \
+    && adduser --uid 1000 --gid 1000 --system --home /home/app --shell /usr/sbin/nologin app \
+    && mkdir -p /home/app && chown app:app /home/app
+ENV HOME=/home/app
+
+# Root Python modules reused by the backend, plus the backend package itself.
+COPY --chown=app:app config.py db.py prompt.py logging_utils.py ./
+COPY --chown=app:app backend/ backend/
+# The built SPA, at ../frontend/dist relative to backend/main.py → /app/frontend/dist.
+COPY --from=web --chown=app:app /web/dist ./frontend/dist
+
+COPY docker/entrypoint-api.sh /usr/local/bin/entrypoint-api.sh
+RUN chmod +x /usr/local/bin/entrypoint-api.sh
+
+# Runtime-writable bind-mounts (the SQLite DB in ./auth_data, logs in ./logs).
+RUN mkdir -p logs auth_data && chown app:app /app logs auth_data
+
+EXPOSE 8080
+
+# Starts as root (to chown the bind-mounts), then drops to app via gosu.
+ENTRYPOINT ["/usr/local/bin/entrypoint-api.sh"]
