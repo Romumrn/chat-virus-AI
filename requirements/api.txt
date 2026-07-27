@@ -1,0 +1,8 @@
+# Dependencies for the FastAPI backend (backend/) — used by docker/Dockerfile.api.
+# Reuses the shared base (fastmcp, plotly, requests) and adds the web stack.
+-r base.txt
+fastapi>=0.115
+uvicorn[standard]>=0.30
+PyJWT>=2.8
+bcrypt>=4.0
+python-multipart>=0.0.9

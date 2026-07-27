@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --primary: 160 84% 32%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 160 60% 94%;
+  --accent-foreground: 160 84% 20%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 160 84% 32%;
+  --radius: 0.6rem;
+}
+
+.dark,
+[data-theme="dark"] {
+  --background: 222 47% 8%;
+  --foreground: 210 40% 96%;
+  --card: 222 40% 11%;
+  --card-foreground: 210 40% 96%;
+  --primary: 160 70% 45%;
+  --primary-foreground: 222 47% 8%;
+  --secondary: 217 33% 17%;
+  --secondary-foreground: 210 40% 96%;
+  --muted: 217 33% 17%;
+  --muted-foreground: 215 20% 65%;
+  --accent: 217 33% 20%;
+  --accent-foreground: 160 70% 70%;
+  --destructive: 0 63% 45%;
+  --destructive-foreground: 210 40% 96%;
+  --border: 217 33% 20%;
+  --input: 217 33% 22%;
+  --ring: 160 70% 45%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  margin: 0;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Markdown answer styling */
+.prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; margin: 0.8em 0 0.4em; }
+.prose-chat h1 { font-size: 1.3rem; }
+.prose-chat h2 { font-size: 1.15rem; }
+.prose-chat h3 { font-size: 1.05rem; }
+.prose-chat p { margin: 0.5em 0; line-height: 1.65; }
+.prose-chat ul, .prose-chat ol { margin: 0.5em 0; padding-left: 1.4em; }
+.prose-chat li { margin: 0.2em 0; }
+.prose-chat a { color: hsl(var(--primary)); text-decoration: underline; }
+.prose-chat code { background: hsl(var(--muted)); padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.85em; }
+.prose-chat pre { background: hsl(var(--muted)); padding: 0.8em; border-radius: 8px; overflow-x: auto; }
+.prose-chat pre code { background: none; padding: 0; }
+.prose-chat table { border-collapse: collapse; margin: 0.6em 0; display: block; overflow-x: auto; }
+.prose-chat th, .prose-chat td { border: 1px solid hsl(var(--border)); padding: 0.35em 0.6em; text-align: left; }
