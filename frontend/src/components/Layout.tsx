@@ -85,8 +85,15 @@ export default function Layout() {
           ))}
         </nav>
         <div className="border-t border-border p-3 text-xs text-muted-foreground">
-          Viromech@t · SHAPE-Med@Lyon
-          ![Repo](https://github.com/Romumrn/viromechat)
+          <div>Viromech@t · SHAPE-Med@Lyon</div>
+          <a
+            href="https://github.com/Romumrn/viromechat"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            Repo
+          </a>
         </div>
       </aside>
 
