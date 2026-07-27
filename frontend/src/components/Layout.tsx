@@ -94,7 +94,7 @@ export default function Layout() {
             rel="noopener noreferrer"
             className="text-primary hover:underline"
           >
-            Repo
+            Git repository
           </a>
         </div>
       </aside>

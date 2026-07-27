@@ -8,9 +8,9 @@ import { Lightbulb, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui";
 
 const TIPS = [
-  "Use English and provide as much relevant detail as you can",
+  "Use English and provide as much relevant detail as you can", 
   "Ask precise and clearly formulated questions, avoid acronyms or abbreviations",
-  "A vague question leads to a vague answer ;)",
+  "Stupid question leads to stupid answer ;)",
 ];
 
 const EXAMPLES = [
