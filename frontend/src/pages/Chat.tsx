@@ -38,7 +38,16 @@ interface Expert {
   model: string;
   temperature: number;
   top_p: number;
+  presence_penalty: number;
+  frequency_penalty: number;
+  seed: number;
+  max_completion_tokens: number;
+  parallel_tool_calls: boolean;
   max_tool_calls: number;
+  max_context_turns: number;
+  preview_rows: number;
+  wikipedia_limit: number;
+  max_tool_content: number;
 }
 
 export default function Chat() {
@@ -72,7 +81,16 @@ export default function Chat() {
     model: "",
     temperature: 0.2,
     top_p: 0.9,
+    presence_penalty: -0.2,
+    frequency_penalty: 0.2,
+    seed: 42,
+    max_completion_tokens: 4096,
+    parallel_tool_calls: false,
     max_tool_calls: 7,
+    max_context_turns: 5,
+    preview_rows: 50,
+    wikipedia_limit: 4000,
+    max_tool_content: 6000,
   });
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -138,7 +156,16 @@ export default function Chat() {
             model: expert.model || undefined,
             temperature: expert.temperature,
             top_p: expert.top_p,
+            presence_penalty: expert.presence_penalty,
+            frequency_penalty: expert.frequency_penalty,
+            seed: expert.seed,
+            max_completion_tokens: expert.max_completion_tokens,
+            parallel_tool_calls: expert.parallel_tool_calls,
             max_tool_calls: expert.max_tool_calls,
+            max_context_turns: expert.max_context_turns,
+            preview_rows: expert.preview_rows,
+            wikipedia_limit: expert.wikipedia_limit,
+            max_tool_content: expert.max_tool_content,
           }
         : {}),
     };
@@ -180,6 +207,7 @@ export default function Chat() {
             wikipedia_urls: ev.wikipedia,
             pubmed_urls: ev.pubmed,
             ncbi_urls: ev.ncbi,
+            executed_codes: ev.executed_codes,
           };
           break;
         case "final":
@@ -314,7 +342,17 @@ export default function Chat() {
             <Welcome name={user?.first_name || ""} onExample={(q) => send(q)} />
           )}
           {messages.map((m, i) => (
-            <MessageBubble key={i} msg={m} />
+            <MessageBubble
+              key={i}
+              msg={m}
+              question={
+                m.role === "assistant" && messages[i - 1]?.role === "user"
+                  ? messages[i - 1].content
+                  : m.role === "assistant"
+                    ? ""
+                    : undefined
+              }
+            />
           ))}
 
           {/* Live activity while a turn streams */}
@@ -368,7 +406,7 @@ export default function Chat() {
                 <Input
                   type="range"
                   min={0}
-                  max={1}
+                  max={2}
                   step={0.05}
                   value={expert.temperature}
                   onChange={(e) => setExpert({ ...expert, temperature: +e.target.value })}
@@ -392,12 +430,124 @@ export default function Chat() {
                 <Input
                   type="range"
                   min={1}
-                  max={15}
+                  max={20}
                   step={1}
                   value={expert.max_tool_calls}
                   onChange={(e) => setExpert({ ...expert, max_tool_calls: +e.target.value })}
                 />
               </div>
+              <div>
+                <label className="text-xs text-muted-foreground">
+                  Presence penalty {expert.presence_penalty}
+                </label>
+                <Input
+                  type="range"
+                  min={-2}
+                  max={2}
+                  step={0.1}
+                  value={expert.presence_penalty}
+                  onChange={(e) => setExpert({ ...expert, presence_penalty: +e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">
+                  Frequency penalty {expert.frequency_penalty}
+                </label>
+                <Input
+                  type="range"
+                  min={-2}
+                  max={2}
+                  step={0.1}
+                  value={expert.frequency_penalty}
+                  onChange={(e) => setExpert({ ...expert, frequency_penalty: +e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Seed</label>
+                <Input
+                  type="number"
+                  step={1}
+                  value={expert.seed}
+                  onChange={(e) => setExpert({ ...expert, seed: +e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">
+                  Max completion tokens {expert.max_completion_tokens}
+                </label>
+                <Input
+                  type="range"
+                  min={512}
+                  max={32768}
+                  step={512}
+                  value={expert.max_completion_tokens}
+                  onChange={(e) =>
+                    setExpert({ ...expert, max_completion_tokens: +e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">
+                  Max context turns {expert.max_context_turns}
+                </label>
+                <Input
+                  type="range"
+                  min={1}
+                  max={20}
+                  step={1}
+                  value={expert.max_context_turns}
+                  onChange={(e) => setExpert({ ...expert, max_context_turns: +e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">
+                  Preview rows {expert.preview_rows}
+                </label>
+                <Input
+                  type="range"
+                  min={5}
+                  max={200}
+                  step={5}
+                  value={expert.preview_rows}
+                  onChange={(e) => setExpert({ ...expert, preview_rows: +e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">
+                  Wiki limit (chars) {expert.wikipedia_limit}
+                </label>
+                <Input
+                  type="range"
+                  min={500}
+                  max={30000}
+                  step={500}
+                  value={expert.wikipedia_limit}
+                  onChange={(e) => setExpert({ ...expert, wikipedia_limit: +e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">
+                  Max tool content (chars) {expert.max_tool_content}
+                </label>
+                <Input
+                  type="range"
+                  min={2000}
+                  max={30000}
+                  step={1000}
+                  value={expert.max_tool_content}
+                  onChange={(e) => setExpert({ ...expert, max_tool_content: +e.target.value })}
+                />
+              </div>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={expert.parallel_tool_calls}
+                  onChange={(e) =>
+                    setExpert({ ...expert, parallel_tool_calls: e.target.checked })
+                  }
+                />
+                Parallel tool calls
+              </label>
             </div>
           </div>
         )}

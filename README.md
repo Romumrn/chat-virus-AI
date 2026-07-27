@@ -8,6 +8,11 @@ A conversational agent for exploring viral taxonomy and virus–host data, built
 tool-calling architecture: the LLM never sees raw data directly, it can only act through a
 small set of audited tools exposed by a separate [MCP server](README_MCP.md).
 
+> **Architecture note** — Viromech@t now runs as a **React front-end + FastAPI backend**
+> (this document). The original single-file Streamlit app (`app.py`) is kept as a **legacy**
+> option during the transition and shares the same database. See [README_API.md](README_API.md)
+> for the API/roles deep-dive and [README_MCP.md](README_MCP.md) for the tool/resource reference.
+
 ## Project Context
 
 This project is developed within the framework of **SHAPE-Med@Lyon** and contributes to the
@@ -24,41 +29,46 @@ grounding of every biological statement in tool output.
 
 ## Architecture
 
-The system is split into **two independent processes**, `app.py` and `server_mcp.py`, plus the
-external **Albert API**. Every request starts and ends at `app.py`: it round-trips to Albert (top)
-to decide what to do, then round-trips to `server_mcp.py` (bottom) to actually do it, feeding the
-result back into the next round-trip to Albert — repeating until Albert returns a final answer
-instead of more tool calls:
+Three independent processes. The browser talks only to the **FastAPI backend**; the backend
+round-trips to the **Albert API** to decide what to do, then to the **MCP server** to actually
+do it, feeding each result back into the next round-trip to Albert — repeating until Albert
+returns a final answer instead of more tool calls. The agent turn is streamed to the browser
+over **Server-Sent Events** (status → tool calls → figures → sources → final answer).
 
 ```
-┌─────────────────────────┐
-│       Albert API        │
-│                         │
-└────────────────────────┘
-             ▼
-             │  chat history + tool specs
-             │  tool_calls / final answer
-             ▼
-┌─────────────────────┐   HTTP request      ┌───────────────────────────┐
-│   app.py            │ ─────────────────►  │   server_mcp.py           │
-│   Streamlit client  │ ◄─────────────────  │   FastMCP server          │
-│   (chat UI, agent   │   tools + resources │   (owns all data access:  │
-│    loop)            │                     │   taxonomy CSV + S3 host  │
-└─────────────────────┘                     │   Parquet via DuckDB)     │
-                                            └───────────────────────────┘
+                         ┌─────────────────────────┐
+                         │        Albert API       │
+                         │  (sovereign LLM, OpenAI- │
+                         │   compatible tool-calls) │
+                         └────────────┬────────────┘
+                            history + │ tool_calls /
+                             tool specs│ final answer
+                                      ▼
+┌──────────────────┐   REST + SSE   ┌─────────────────────┐   HTTP   ┌───────────────────────────┐
+│  React front     │ ─────────────► │   FastAPI backend   │ ───────► │   server_mcp.py           │
+│  (Vite + TS +    │ ◄───────────── │   (backend/)        │ ◄─────── │   FastMCP server          │
+│   Tailwind)      │   JWT auth     │   agent loop, auth, │  tools + │   (owns all data access:  │
+│  :5173 (dev)     │                │   roles, SSE  :8080 │ resources│   taxonomy CSV + S3 host  │
+└──────────────────┘                └─────────────────────┘          │   Parquet via DuckDB)     │
+                                                                     └───────────────────────────┘
 ```
 
-* **`app.py`** never touches a dataframe or a credential for the S3 bucket, and never talks to
-  Albert and `server_mcp.py` in the same round-trip — it's strictly the middleman relaying
-  between the two. It lists the tools the MCP server currently exposes, forwards them to the
-  [Albert API](https://albert.api.etalab.gouv.fr) (French government sovereign LLM infrastructure,
-  OpenAI-compatible) for tool-calling, and dispatches each call back to the MCP server. It is
-  deliberately generic: it reads a tool's JSON schema to decide which UI-configured defaults
-  apply, rather than hardcoding tool names.
-* **`server_mcp.py`** owns the datasets, the DuckDB/S3 connection, and every tool's business
-  logic and guardrails. See [README_MCP.md](README_MCP.md) for the full tool/resource reference. It never talks to Albert directly.
+* **`frontend/`** — React + Vite + TypeScript + Tailwind SPA (hand-written shadcn-style UI in
+  `src/components/ui.tsx`). Pages: Login, Register, Chat, Account, Admin, Dev. In production it is
+  built (`frontend/dist`) and served by the backend as a single origin (no CORS).
+* **`backend/`** — FastAPI app. Owns authentication (JWT), the three-role model, conversation
+  persistence, and the agent loop (`backend/agent.py`, an async generator of SSE events). It never
+  touches a dataframe or an S3 credential — it lists the MCP server's tools, forwards them to the
+  [Albert API](https://albert.api.etalab.gouv.fr) (French government sovereign LLM infrastructure)
+  for tool-calling, and dispatches each call back to the MCP server. It is deliberately generic:
+  it reads each tool's JSON schema to decide which configured defaults apply, rather than
+  hardcoding tool names. It reuses the repo-root modules unchanged: `db.py` (SQLite),
+  `config.py`, `prompt.py`, `logging_utils.py`.
+* **`server_mcp.py`** — owns the datasets, the DuckDB/S3 connection, and every tool's business
+  logic and guardrails. See [README_MCP.md](README_MCP.md). It never talks to Albert directly.
 
-`app.py` and `server_mcp.py` read their own, separate secrets file, see [Configuration](#configuration). Albert needs only the API key in `.env.app`.
+The backend and the MCP server read their own separate secrets file — see
+[Configuration](#configuration). Albert needs only the API key in `.env.app`.
 
 
 ## Features
@@ -66,19 +76,20 @@ instead of more tool calls:
 * Natural-language querying of viral taxonomy and virus–host relationships
 * Authoritative taxonomy/acronym resolution via NCBI Taxonomy (e.g. `HIV` → `Lentivirus humimdef1`)
 * SQL queries against a multi-GB virus–host Parquet dataset on S3, without ever loading it into memory (DuckDB + `httpfs`/`spatial`)
-* Interactive Plotly charts and geographic maps
+* Interactive Plotly charts and geographic maps (scroll-to-zoom enabled)
 * Wikipedia and PubMed lookups for biological/clinical background, with mandatory inline citations
-* Voice input — record a question, transcribed via Albert API's Whisper endpoint
-* Conversation memory across up to 5 questions (Q&A text only — tool-call traces are stripped after each turn) with an explicit in-chat reset notice once the limit is hit
-* Required local user accounts (login + self-service registration, no external IdP) with a per-user chat history that persists across sessions — see [Accounts](#accounts)
+* **Voice input** — record a question with the 🎙️ mic button; transcribed via Albert API's Whisper endpoint
+* Multi-conversation history (ChatGPT-style sidebar: new / switch / rename / delete), persisted per user in SQLite
+* Sliding conversation memory over the last few Q&A turns (tool-call traces stripped after each turn)
+* **Three roles** — `user` < `dev` < `admin` — with Expert mode, a Dev console, and an Admin console (see [Roles](#roles-accounts))
 * PMID hallucination guard: any PMID not returned by an actual `pubmed_search` call is stripped from the answer
-* Per-tool-call status line (search keyword only — no clutter for dataset/map calls) with full detail logged to disk
-* In-app error reporting button (question, answer, executed code, and recent logs bundled into a report file)
+* Per-tool-call live status line (search keyword only — no clutter for dataset/map calls) with full detail logged to disk
+* In-app 🚩 **"Report an error"** button (question, answer, executed code, and recent logs bundled into a report file)
 
 
 ## Scientific Guardrails
 
-Enforced through the system prompt, tool-level validation, and post-processing on the client:
+Enforced through the system prompt, tool-level validation, and post-processing on the backend:
 
 * No invention of taxa, species counts, coordinates, or any biological fact — every statement must trace back to a tool call.
 * Acronyms (HIV, MPOX, SARS, …) must be resolved via `ncbi_taxonomy_search` before being used in any other tool.
@@ -99,60 +110,57 @@ Enforced through the system prompt, tool-level validation, and post-processing o
 
 ## Transparency & Logging
 
-* Executed SQL/pandas code is shown in the "📚 Sources" expander of each response.
-* Wikipedia, PubMed, and NCBI Taxonomy links used to build an answer are listed separately in the same expander.
+* Executed SQL/pandas code is shown in the "📚 Sources" panel of each response, next to the
+  Wikipedia / PubMed / NCBI Taxonomy links used to build the answer.
 * Every tool call is numbered and fully traced in `logs/agent_YYYY-MM.log`, including a preview of the actual response content (not just success/failure).
-* Error reports submitted via the in-app "🚩 Report an error" button are saved to `logs/error_reports/`, bundled with the question, answer, executed code, and recent log lines.
-
+* Error reports submitted via the in-app "🚩 Report an error" button are saved to `logs/error_reports/`, bundled with the question, answer, executed code, and recent log lines. `dev`+ users can also tail the agent log from the Dev page.
 
 
 ## Conversation Memory
 
 Each new question is answered with the previous questions and the model's final text answers as
 context. Tool calls and their raw results are dropped from history right after each turn (see
-`_clean_history_messages` in `app.py`) — only the user/assistant text is kept. This still lets the
-model resolve follow-ups like *"and which family is that genus part of?"* without the subject
-being restated, without replaying every past tool call/result to Albert on every new question.
+`_clean_history_messages` / `build_context_window` in `backend/albert.py`) — only the
+user/assistant text is kept. This still lets the model resolve follow-ups like *"and which family
+is that genus part of?"* without the subject being restated, and without replaying every past
+tool call/result to Albert on every new question.
 
-This context accumulates for up to `MAX_CONTEXT_TURNS` questions (`config.py`, default **5**,
-adjustable at runtime from the ⚙️ Expert mode sidebar). Once the limit is reached, the conversation
-memory resets — a message is posted in the chat ("🔄 Conversation context reset after N
-questions — starting fresh…") and the next question starts with no memory of what came before. A
-failed turn (API timeout/error) is never added to memory and doesn't count against the limit.
+Memory is a **sliding window**: the last `MAX_CONTEXT_TURNS` question/answer exchanges (`config.py`,
+default **5**, adjustable at runtime in Expert mode) are sent to Albert. Older turns simply fall
+out of the prompt but stay on screen and in the database — "unbounded scrollback, bounded prompt",
+like ChatGPT. A failed turn (API timeout/error) is never added to memory. The full conversation is
+saved to SQLite per user, so it survives page reloads and new sessions.
 
-When [accounts](#accounts) are enabled, this same history is also saved to disk per user (see
-below), so it survives page reloads — not just the current browser session.
+## Roles & Accounts
 
-## Accounts
+A user account is required — there is no guest mode. Accounts are fully local (no external
+identity provider, no email service): the backend issues a **JWT** on login and stores users in
+the SQLite database (`auth_data/viromechat.db`), with bcrypt-hashed passwords. The bcrypt hashes
+from the legacy Streamlit app remain valid, so existing logins keep working.
 
-A user account is required to use the app — there is no guest mode. Accounts are fully local — no
-external identity provider, no email service — built on top of
-[`streamlit-authenticator`](https://github.com/mkhorasani/Streamlit-Authenticator) for login,
-session cookies, and credential storage, with a custom minimal registration form:
+Three roles, ascending privilege — `user` < `dev` < `admin`:
 
-* **Registration** — first name, last name, institutional email, and password. No separate
-  username (the email doubles as one), no repeat-password field. Validated at submit: the password
-  must be **at least 6 characters and contain 1 special character** (shown as a hint under the
-  field), and the email domain must **not** be a free webmail provider (Gmail, Outlook, Yahoo,
-  iCloud, Proton, Orange, … — see `_BLOCKED_EMAIL_DOMAINS` in `app.py`). This is a quick blocklist,
-  not a real institution allowlist — someone with their own custom domain still gets through, the
-  goal is just to steer people to their work address. Self-service and collapsed by default: anyone
-  who can reach the app can register, but the form only expands once someone clicks "Create an
-  account".
-* **Optional invite code** — set `REGISTRATION_CODE` in `.env.app` (or `.streamlit/secrets.toml`)
-  to gate registration behind a shared code: an extra "Registration code" field appears and must
-  match before an account is created. Leave it unset to keep registration open. The expected value
-  is only ever read from the secret, never stored in the source.
-* **Login** — asks for email + password. A signed cookie then keeps the user logged in across page
-  reloads for `cookie.expiry_days` (30 by default).
-* **Storage** — emails, bcrypt-hashed passwords, first/last names live in
-  `auth_data/.streamlit_auth.yaml` (gitignored, auto-created on first run with a random
-  cookie-signing key; under Docker it's a host bind-mount, see [Running with Docker](#running-with-docker)).
-  There is no email verification step — account creation is immediate, gated only by email
-  uniqueness.
-* **Per-user chat history** — each account's conversation (questions, answers, and the Albert-format
-  context used for follow-ups) is saved to its own file under `logs/user_histories/` and reloaded
-  on login, so it persists across sessions. A "🗑️ Clear my history" button in the sidebar resets it.
+* **user** — chat, manage their own conversations, change their password.
+* **dev** — the above **+ Expert mode** (model, sampling parameters, agent limits), the **MCP tool
+  tester**, and the **agent log viewer** (Dev page).
+* **admin** — the above **+ the Administration page**: list/search users, change roles, delete
+  users, platform stats, and read any user's conversations.
+
+Bootstrap the first admin with `ADMIN_EMAILS` in `.env.app` (that email gets `admin` on
+registration); admins then promote others from the UI.
+
+* **Registration** — first name, last name, institutional email (the email doubles as the
+  username), and a password that must be **at least 12 characters with 1 lowercase, 1 uppercase,
+  1 digit and 1 special character** (a live checklist shows each rule as you type). The email
+  domain must **not** be a free webmail provider (Gmail, Outlook, Yahoo, iCloud, Proton, Orange,
+  … — see `_BLOCKED_EMAIL_DOMAINS` in `backend/auth.py`). This is a quick blocklist, not a real
+  institution allowlist — someone with their own custom domain still gets through; the goal is
+  just to steer people to their work address.
+* **Optional invite code** — set `REGISTRATION_CODE` in `.env.app` to gate registration behind a
+  shared code. Leave it unset to keep registration open. The expected value is only ever read from
+  the secret, never stored in the source.
+* **Login** — email + password, returns a JWT kept in the browser (`localStorage`) and sent as a
+  `Bearer` header. Token lifetime is `JWT_EXPIRE_MIN` (default 720 min = 12 h).
 
 
 ## Datasets
@@ -164,7 +172,7 @@ session cookies, and credential storage, with a custom minimal registration form
 
 Column-by-column descriptions of both datasets are **not hardcoded in the client** — they are
 published by the MCP server as resources (`resource://datasets/taxonomy/schema` and
-`resource://datasets/host/schema`) and read once per conversation by `app.py`, which folds them
+`resource://datasets/host/schema`) and read once per conversation by the backend, which folds them
 into the system prompt. This means the two datasets' schemas can change server-side without any
 client code change.
 
@@ -174,32 +182,36 @@ client code change.
 ### Requirements
 
 * Python 3.10+
+* Node.js 18+ (for the React front-end)
 * An **Albert API key** ([albert.api.etalab.gouv.fr](https://albert.api.etalab.gouv.fr))
 * Read access to the S3-compatible bucket hosting the virus–host Parquet dataset
-* Python packages (`streamlit>=1.53` is required for the native microphone button in the chat input):
 
-```bash
-pip install -r requirements/all.txt
-```
-
-  Dependencies are split per process under [`requirements/`](requirements/) — `app.txt` for
-  `app.py`, `mcp.txt` for `server_mcp.py`, both pulling shared packages from `base.txt`. `all.txt`
-  combines both for local, non-Docker dev running both processes on one host; `dev.txt` adds
-  `pytest` for the [test suite](#testing).
+Python dependencies are split per process under [`requirements/`](requirements/): `api.txt` for the
+FastAPI backend, `mcp.txt` for `server_mcp.py`, both pulling shared packages from `base.txt`
+(`app.txt` is the legacy Streamlit client). `all.txt` combines everything for local dev on one
+host; `dev.txt` adds `pytest` for the [test suite](#testing).
 
 ### Configuration
 
-Secrets are split into **two separate `.env` files, one per process** — never shared, never
-imported by the other process:
+Secrets are split into **two separate `.env` files** — never shared, never imported by the other
+process:
 
-* **`.env.app`** — read by `app.py` (copy from [`.env.app.example`](.env.app.example)):
+* **`.env.app`** — read by the backend (copy from [`.env.app.example`](.env.app.example)):
 
   ```bash
   ALBERT_API_KEY=sk-...
+  # Long random value in production — anyone who knows it can mint valid tokens:
+  #   python -c "import secrets; print(secrets.token_hex(32))"
+  JWT_SECRET=...
+  # Optional:
+  # JWT_EXPIRE_MIN=720
+  # ADMIN_EMAILS=alice@lab.fr,bob@univ.fr   # bootstrap the first admin(s)
+  # REGISTRATION_CODE=...                   # shared invite code gate
   ```
 
-  User accounts (see [Accounts](#accounts)) need no configuration here — they're always on and
-  self-provisioning (`.streamlit_auth.yaml` is created automatically on first run).
+  User accounts need no further configuration — the SQLite database
+  (`auth_data/viromechat.db`) is created automatically on first run, and any pre-existing
+  legacy accounts / chat history are imported into it.
 
 * **`.env.mcp`** — read by `server_mcp.py` (copy from [`.env.mcp.example`](.env.mcp.example)):
 
@@ -215,61 +227,60 @@ imported by the other process:
   # S3_URL_STYLE=path
   ```
 
-Both files are gitignored. When deploying to **Streamlit Community Cloud**, use
-`.streamlit/secrets.toml` instead for the app-side secrets — it takes priority over `.env.app`
-whenever both are present (see `_get_secret` in `app.py`).
+Both files are gitignored. Non-secret configuration (model defaults, sampling parameters, timeouts,
+the MCP server URL, …) lives in `config.py`, shared by all processes.
 
-Non-secret configuration (model defaults, sampling parameters, timeouts, the MCP server URL, …)
-lives in `config.py`, shared by both processes.
+### Running (development)
 
-### Running
-
-Two terminals, in order:
+Three terminals from the repo root:
 
 ```bash
-# 1. Start the MCP server (loads the taxonomy CSV, connects to S3)
-python server_mcp.py
+# 1. MCP data server (loads the taxonomy CSV, connects to S3 — needs .env.mcp)
+python3 server_mcp.py
 
-# 2. Start the Streamlit app (connects to the MCP server at MCP_SERVER_URL)
-streamlit run app.py
+# 2. FastAPI backend (needs .env.app) — interactive docs at http://localhost:8080/docs
+pip install -r requirements/api.txt
+uvicorn backend.main:app --reload --port 8080
+
+# 3. React front-end (Vite dev server, proxies /api → :8080)
+cd frontend
+npm install
+npm run dev            # http://localhost:5173
 ```
 
-`app.py` checks the MCP server is reachable on startup and refuses to proceed otherwise.
+If the backend runs on a non-default port, start Vite with
+`API_PROXY_TARGET=http://localhost:<port> npm run dev`.
 
 ### Running with Docker
 
-Each process gets its own image and container, orchestrated by `docker-compose.yml`:
-
-* **`docker/Dockerfile.mcp`** → `mcp` service (`server_mcp.py`, port 8000)
-* **`docker/Dockerfile.app`** → `app` service (`app.py`, port 8501) — waits for `mcp`'s healthcheck to
-  pass before starting (`depends_on: condition: service_healthy`), then reaches it at
-  `http://mcp:8000/mcp` (`MCP_SERVER_URL`, set via Compose — the two containers no longer share
-  `localhost`, unlike when both processes ran in one container)
+Two containers (`mcp` + `api`); the API also serves the built React SPA, so it is a single origin
+with no CORS. Set a real `JWT_SECRET` in `.env.app` first.
 
 ```bash
-docker compose up --build
+docker compose up --build            # mcp + api → http://localhost:8080
+docker compose --profile legacy up   # also brings up the old Streamlit UI on :8501
 ```
 
-Secrets are excluded from both images by `.dockerignore` — each service loads only its own
-`.env.app` / `.env.mcp` at runtime via Compose's `env_file:`, never baked into the image. Local
-accounts (`auth_data/.streamlit_auth.yaml`, i.e. `AUTH_CONFIG_PATH`) live in a **host bind-mount**
-(`./auth_data`), so the file sits directly on the host/VM and can be read, edited, or backed up
-without going through the container. The `auth_data/` directory is tracked in git (via `.gitkeep`,
-its contents gitignored) so it exists before the first run.
+* **`docker/Dockerfile.mcp`** → `mcp` service (`server_mcp.py`, port 8000)
+* **`docker/Dockerfile.api`** → `api` service (FastAPI + built SPA, port 8080) — waits for `mcp`'s
+  healthcheck before starting, then reaches it at `http://mcp:8000/mcp` (`MCP_SERVER_URL`)
+* **`docker/Dockerfile.app`** → legacy `app` service (Streamlit, port 8501), only under the
+  `legacy` profile
 
-Because a bind-mount keeps the host directory's ownership — which may not match the container's
-non-root `app` user (uid 1000) and would otherwise cause `PermissionError: … auth_data/…` — the
-app container starts from an entrypoint (`docker/entrypoint-app.sh`) that runs briefly as root to
-`chown` the mounted `auth_data/` and `logs/` to the app user, then drops privileges (via `gosu`)
-to run Streamlit as `app`. So account creation works regardless of host-side ownership, no manual
-`chown` needed.
+Secrets are excluded from the images by `.dockerignore` — each service loads only its own
+`.env.app` / `.env.mcp` at runtime. The SQLite database lives in a **host bind-mount**
+(`./auth_data/viromechat.db`), shared by the API and the legacy Streamlit app so both can run
+during the transition, and readable/backup-able from the host. Because a bind-mount keeps the host
+directory's ownership — which may not match the container's non-root `app` user (uid 1000) — the
+API container starts from an entrypoint (`docker/entrypoint-api.sh`) that briefly runs as root to
+`chown` the mounted `auth_data/` and `logs/`, then drops privileges to run as `app`.
 
 
 ## Testing
 
-Unit tests cover the pure helper logic in `app.py` and `server_mcp.py` (argument parsing,
-citation/PMID guardrails, SQL validation, table/figure formatting, ...) — see `tests/`. They run
-in CI on every push and pull request to `main` (see `.github/workflows/ci.yml`).
+Unit tests cover the pure helper logic (argument parsing, citation/PMID guardrails, SQL
+validation, table/figure formatting, auth/password rules, …) — see `tests/`. They run in CI on
+every push and pull request to `main` (see `.github/workflows/ci.yml`).
 
 ```bash
 pip install -r requirements/all.txt -r requirements/dev.txt

@@ -21,12 +21,16 @@ from fastapi.responses import StreamingResponse
 import db
 from config import (
     ALBERT_MODEL_DEFAULT, DEFAULT_TEMPERATURE, DEFAULT_TOP_P,
-    DEFAULT_MAX_TOOL_CALLS, ROLE_LEVEL,
+    DEFAULT_MAX_TOOL_CALLS, DEFAULT_PRESENCE_PENALTY, DEFAULT_FREQUENCY_PENALTY,
+    DEFAULT_SEED, DEFAULT_MAX_COMPLETION_TOKENS, DEFAULT_PARALLEL_TOOL_CALLS,
+    DEFAULT_PREVIEW_ROWS, DEFAULT_WIKIPEDIA_LIMIT, DEFAULT_MAX_TOOL_CONTENT,
+    MAX_CONTEXT_TURNS, ROLE_LEVEL,
 )
 from backend import auth
 from backend.agent import run_agent
 from backend.albert import transcribe_audio
-from backend.schemas import ChatIn
+from backend.reports import save_error_report
+from backend.schemas import ChatIn, ErrorReportIn
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -48,6 +52,14 @@ def _sse(event: dict) -> str:
 def _title_from(text: str) -> str:
     t = " ".join((text or "").strip().split())
     return (t[:48] + "…") if len(t) > 48 else (t or "New conversation")
+
+
+@router.post("/report", status_code=status.HTTP_201_CREATED)
+def report_error(body: ErrorReportIn, user: dict = Depends(auth.get_current_user)):
+    """Save a user's "Report an error" feedback for a given answer (same JSON
+    format the Streamlit app wrote to logs/error_reports/)."""
+    save_error_report(body.question, body.answer, body.executed_codes, body.comment)
+    return {"ok": True}
 
 
 @router.post("/transcribe")
@@ -85,15 +97,28 @@ def chat(body: ChatIn, user: dict = Depends(auth.get_current_user)):
 
     # Expert-mode overrides are DEV+ only; plain users always get the defaults.
     is_expert = ROLE_LEVEL.get(user.get("role", "user"), 0) >= ROLE_LEVEL["dev"]
+
+    def _override(value, default):
+        """Use a DEV/ADMIN-supplied value when present, else the server default."""
+        return value if (is_expert and value is not None) else default
+
     model = body.model if (is_expert and body.model) else ALBERT_MODEL_DEFAULT
-    temperature = body.temperature if (is_expert and body.temperature is not None) else DEFAULT_TEMPERATURE
-    top_p = body.top_p if (is_expert and body.top_p is not None) else DEFAULT_TOP_P
-    max_tool_calls = body.max_tool_calls if (is_expert and body.max_tool_calls) else DEFAULT_MAX_TOOL_CALLS
+    temperature = _override(body.temperature, DEFAULT_TEMPERATURE)
+    top_p = _override(body.top_p, DEFAULT_TOP_P)
+    max_tool_calls = _override(body.max_tool_calls, DEFAULT_MAX_TOOL_CALLS)
+    presence_penalty = _override(body.presence_penalty, DEFAULT_PRESENCE_PENALTY)
+    frequency_penalty = _override(body.frequency_penalty, DEFAULT_FREQUENCY_PENALTY)
+    seed = _override(body.seed, DEFAULT_SEED)
+    max_completion_tokens = _override(body.max_completion_tokens, DEFAULT_MAX_COMPLETION_TOKENS)
+    parallel_tool_calls = _override(body.parallel_tool_calls, DEFAULT_PARALLEL_TOOL_CALLS)
+    preview_rows = _override(body.preview_rows, DEFAULT_PREVIEW_ROWS)
+    wikipedia_limit = _override(body.wikipedia_limit, DEFAULT_WIKIPEDIA_LIMIT)
+    max_tool_content = _override(body.max_tool_content, DEFAULT_MAX_TOOL_CONTENT)
+    max_context_turns = _override(body.max_context_turns, MAX_CONTEXT_TURNS)
 
     # Bounded context replayed to ALBERT, built from stored history.
     from backend.albert import build_context_window
-    from config import MAX_CONTEXT_TURNS
-    history = build_context_window(db.list_messages_json(conn, cid), MAX_CONTEXT_TURNS)
+    history = build_context_window(db.list_messages_json(conn, cid), max_context_turns)
 
     # Persist the user turn now so it survives even if the stream is dropped.
     db.add_message(conn, cid, "user", query)
@@ -109,6 +134,11 @@ def chat(body: ChatIn, user: dict = Depends(auth.get_current_user)):
             async for ev in run_agent(
                 model=model, api_key=api_key, user_query=query, username=email,
                 temperature=temperature, top_p=top_p, max_tool_calls=max_tool_calls,
+                preview_rows=preview_rows, wikipedia_limit=wikipedia_limit,
+                max_tool_content=max_tool_content, presence_penalty=presence_penalty,
+                frequency_penalty=frequency_penalty, seed=seed,
+                max_completion_tokens=max_completion_tokens,
+                parallel_tool_calls=parallel_tool_calls,
                 history_messages=history,
             ):
                 if ev["type"] == "done":

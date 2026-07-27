@@ -26,7 +26,16 @@ export interface ChatRequest {
   model?: string;
   temperature?: number;
   top_p?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  seed?: number;
+  max_completion_tokens?: number;
+  parallel_tool_calls?: boolean;
   max_tool_calls?: number;
+  max_context_turns?: number;
+  preview_rows?: number;
+  wikipedia_limit?: number;
+  max_tool_content?: number;
 }
 
 export async function streamChat(

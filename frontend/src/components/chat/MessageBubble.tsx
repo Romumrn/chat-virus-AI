@@ -6,9 +6,9 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { BookOpen, ChevronDown, ChevronRight, Code2 } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, Code2, Flag } from "lucide-react";
 import PlotlyFigure from "./PlotlyFigure";
-import type { ChatMessage } from "@/lib/api";
+import { api, type ChatMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 function Sources({ msg }: { msg: ChatMessage }) {
@@ -82,7 +82,89 @@ function Sources({ msg }: { msg: ChatMessage }) {
   );
 }
 
-export default function MessageBubble({ msg }: { msg: ChatMessage }) {
+/**
+ * ReportError — the "Report an error" control from the Streamlit app: a button
+ * that opens an optional-comment box and POSTs the question/answer/code to
+ * /api/report. Only shown for assistant turns in the live chat (when `question`
+ * is provided), never in the read-only admin viewer.
+ */
+function ReportError({ msg, question }: { msg: ChatMessage; question: string }) {
+  const [open, setOpen] = useState(false);
+  const [comment, setComment] = useState("");
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  if (sent) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        ⚠️ Error reported — thank you for your feedback.
+      </p>
+    );
+  }
+
+  async function send() {
+    setBusy(true);
+    try {
+      await api.post("/api/report", {
+        question,
+        answer: msg.content,
+        executed_codes: msg.executed_codes || [],
+        comment,
+      });
+      setSent(true);
+      setOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive"
+        title="Signal a wrong or misleading answer"
+      >
+        <Flag className="h-3.5 w-3.5" /> Report an error
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2 rounded-md border border-border p-3">
+          <p className="text-xs font-medium">What went wrong? (optional)</p>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="e.g. Wrong species name, incorrect count, hallucinated data…"
+            rows={2}
+            className="w-full resize-none rounded-md border border-input bg-background p-2 text-sm"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={send}
+              disabled={busy}
+              className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {busy ? "Sending…" : "Send report"}
+            </button>
+            <button
+              onClick={() => setOpen(false)}
+              className="rounded-md border border-border px-3 py-1 text-xs"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function MessageBubble({
+  msg,
+  question,
+}: {
+  msg: ChatMessage;
+  question?: string;
+}) {
   const isUser = msg.role === "user";
   return (
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
@@ -105,6 +187,7 @@ export default function MessageBubble({ msg }: { msg: ChatMessage }) {
               <PlotlyFigure key={i} figure={fig} />
             ))}
             <Sources msg={msg} />
+            {question !== undefined && <ReportError msg={msg} question={question} />}
           </>
         )}
       </div>

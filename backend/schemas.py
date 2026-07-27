@@ -52,6 +52,15 @@ class ChatIn(BaseModel):
     temperature: float | None = None
     top_p: float | None = None
     max_tool_calls: int | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+    seed: int | None = None
+    max_completion_tokens: int | None = None
+    parallel_tool_calls: bool | None = None
+    max_context_turns: int | None = None
+    preview_rows: int | None = None
+    wikipedia_limit: int | None = None
+    max_tool_content: int | None = None
 
 
 class ConversationOut(BaseModel):
@@ -67,6 +76,14 @@ class ConversationCreateIn(BaseModel):
 
 class ConversationRenameIn(BaseModel):
     title: str
+
+
+class ErrorReportIn(BaseModel):
+    """A user's "Report an error" submission for one assistant answer."""
+    question: str = ""
+    answer: str = ""
+    executed_codes: list[str] = []
+    comment: str = ""
 
 
 # ==================== ADMIN / DEV ====================

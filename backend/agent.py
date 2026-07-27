@@ -9,7 +9,8 @@ returned a tuple at the end, this version `yield`s events as they happen:
     {"type": "tool_call",   "name": str, "keyword": str, "icon": str, "label": str}
     {"type": "tool_result", "name": str, "ok": bool}
     {"type": "figure",      "figure": <plotly json dict>}
-    {"type": "sources",     "wikipedia": [...], "pubmed": [...], "ncbi": [...]}
+    {"type": "sources",     "wikipedia": [...], "pubmed": [...], "ncbi": [...],
+                             "executed_codes": [...]}
     {"type": "final",       "content": str}
     {"type": "error",       "message": str}
     {"type": "done",        "history": [...], "figures": [...], "wikipedia": [...],
@@ -330,12 +331,15 @@ async def run_agent(
                 # Record the assistant's final message in the running history
                 messages.append(msg)
 
-                # Only emit a "sources" event if we actually collected any citations
-                if used_wikipedia_urls or used_pubmed_urls or used_ncbi_urls:
+                # Emit a "sources" event if we collected any citations OR ran any
+                # code/SQL — the executed snippets belong in the Sources panel too.
+                if (used_wikipedia_urls or used_pubmed_urls or used_ncbi_urls
+                        or executed_codes):
                     yield {"type": "sources",
                            "wikipedia": used_wikipedia_urls,
                            "pubmed": used_pubmed_urls,
-                           "ncbi": used_ncbi_urls}
+                           "ncbi": used_ncbi_urls,
+                           "executed_codes": executed_codes}
                 # Emit the answer text, then the terminal "done" event with everything
                 # the caller needs to persist (history, figures, sources, executed code)
                 yield {"type": "final", "content": final_text}
