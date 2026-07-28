@@ -68,6 +68,7 @@ export default function Chat() {
   const [transcribing, setTranscribing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Live activity for the in-flight turn.
   const [status, setStatus] = useState("");
@@ -258,7 +259,12 @@ export default function Chat() {
             blob,
             "recording.webm",
           );
-          if (text) send(text);
+          // Drop the transcription into the composer (like Claude Code) so the
+          // user can review/edit it before sending, instead of auto-sending.
+          if (text) {
+            setInput((prev) => (prev ? `${prev.replace(/\s+$/, "")} ${text}` : text));
+            textareaRef.current?.focus();
+          }
         } catch {
           // transcription failed server-side — let the user type instead
         } finally {
@@ -569,6 +575,7 @@ export default function Chat() {
               </Button>
             )}
             <Textarea
+              ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
