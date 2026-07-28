@@ -11,7 +11,7 @@ import db
 from config import MCP_SERVER_URL, LOG_DIR
 from backend import auth
 from backend.albert import mcp_tools_to_openai_spec, unwrap_mcp_result, list_albert_models
-from backend.schemas import McpToolCallIn
+from backend.schemas import McpToolCallIn, ReportStatusUpdateIn
 
 router = APIRouter(prefix="/api/dev", tags=["dev"])
 _dev = auth.require_role("dev")
@@ -65,3 +65,27 @@ def logs(lines: int = 200, _: dict = Depends(_dev)):
     except Exception as e:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Could not read log: {e}")
     return {"path": path, "lines": tail}
+
+
+@router.get("/reports")
+def error_reports(status_filter: str | None = None, _: dict = Depends(_dev)):
+    """User-submitted error reports for triage, newest first. Optionally filter
+    by status (open | in_progress | done)."""
+    if status_filter and status_filter not in db.ERROR_REPORT_STATUSES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid status filter.")
+    return {"reports": db.list_error_reports(db.get_conn(), status_filter)}
+
+
+@router.patch("/reports/{report_id}")
+def update_report(
+    report_id: int, body: ReportStatusUpdateIn, _: dict = Depends(_dev)
+):
+    """Change an error report's triage status (open | in_progress | done)."""
+    if body.status not in db.ERROR_REPORT_STATUSES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"status must be one of {db.ERROR_REPORT_STATUSES}",
+        )
+    if not db.update_error_report_status(db.get_conn(), report_id, body.status):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Report not found.")
+    return {"ok": True, "id": report_id, "status": body.status}

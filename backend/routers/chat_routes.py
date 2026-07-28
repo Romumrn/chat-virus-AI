@@ -56,10 +56,16 @@ def _title_from(text: str) -> str:
 
 @router.post("/report", status_code=status.HTTP_201_CREATED)
 def report_error(body: ErrorReportIn, user: dict = Depends(auth.get_current_user)):
-    """Save a user's "Report an error" feedback for a given answer (same JSON
-    format the Streamlit app wrote to logs/error_reports/)."""
-    save_error_report(body.question, body.answer, body.executed_codes, body.comment)
-    return {"ok": True}
+    """Save a user's "Report an error" feedback for a given answer. Stored in the
+    DB (error_reports) for dev triage, plus a JSON backup under logs/error_reports/."""
+    report_id = save_error_report(
+        body.question,
+        body.answer,
+        body.executed_codes,
+        body.comment,
+        user_email=user.get("email"),
+    )
+    return {"ok": True, "id": report_id}
 
 
 @router.post("/transcribe")

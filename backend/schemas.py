@@ -95,3 +95,8 @@ class RoleUpdateIn(BaseModel):
 class McpToolCallIn(BaseModel):
     name: str
     arguments: dict = {}
+
+
+class ReportStatusUpdateIn(BaseModel):
+    """Dev triage: move an error report between open / in_progress / done."""
+    status: str = Field(..., description="one of: open, in_progress, done")

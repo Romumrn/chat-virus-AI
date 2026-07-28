@@ -121,8 +121,21 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             payload_json    TEXT,
             created_at      TEXT
         );
+        CREATE TABLE IF NOT EXISTS error_reports (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_email     TEXT REFERENCES users(email) ON DELETE SET NULL,
+            question       TEXT,
+            answer         TEXT,
+            executed_codes TEXT,   -- JSON array of code snippets
+            comment        TEXT,
+            recent_logs    TEXT,   -- JSON array — tail of the agent log for context
+            status         TEXT NOT NULL DEFAULT 'open',  -- open | in_progress | done
+            created_at     TEXT,
+            updated_at     TEXT
+        );
         CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_email);
         CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_error_reports_status ON error_reports(status);
         """
     )
     conn.commit()
@@ -423,6 +436,91 @@ def list_messages_json(conn: sqlite3.Connection, conversation_id: int) -> list[d
         m.update(data)
         out.append(m)
     return out
+
+
+# ==================== ERROR REPORTS ====================
+
+ERROR_REPORT_STATUSES = ("open", "in_progress", "done")
+
+
+def create_error_report(
+    conn: sqlite3.Connection,
+    user_email: str | None,
+    question: str,
+    answer: str,
+    executed_codes: list | None,
+    comment: str,
+    recent_logs: list | None = None,
+) -> int:
+    """Persist a user-submitted error report and return its id. Starts 'open'."""
+    now = _now()
+    with _write_lock:
+        cur = conn.execute(
+            """INSERT INTO error_reports
+               (user_email, question, answer, executed_codes, comment,
+                recent_logs, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)""",
+            (
+                user_email,
+                question,
+                answer,
+                json.dumps(executed_codes or [], ensure_ascii=False),
+                comment,
+                json.dumps(recent_logs or [], ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def list_error_reports(
+    conn: sqlite3.Connection, status: str | None = None
+) -> list[dict]:
+    """Error reports, newest first, with JSON columns parsed. Optionally filter
+    by status ('open' | 'in_progress' | 'done')."""
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM error_reports WHERE status = ? ORDER BY id DESC",
+            (status,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM error_reports ORDER BY id DESC"
+        ).fetchall()
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "id": r["id"],
+                "user_email": r["user_email"],
+                "question": r["question"],
+                "answer": r["answer"],
+                "executed_codes": json.loads(r["executed_codes"] or "[]"),
+                "comment": r["comment"],
+                "recent_logs": json.loads(r["recent_logs"] or "[]"),
+                "status": r["status"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            }
+        )
+    return out
+
+
+def update_error_report_status(
+    conn: sqlite3.Connection, report_id: int, status: str
+) -> bool:
+    """Set a report's status. Returns False if the id doesn't exist."""
+    if status not in ERROR_REPORT_STATUSES:
+        raise ValueError(f"invalid status: {status!r}")
+    with _write_lock:
+        cur = conn.execute(
+            "UPDATE error_reports SET status = ?, updated_at = ? WHERE id = ?",
+            (status, _now(), report_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 
 # ==================== ONE-TIME LEGACY MIGRATION ====================
