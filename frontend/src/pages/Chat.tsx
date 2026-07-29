@@ -63,12 +63,19 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
 
-  // Voice input: record a short clip and transcribe it via the backend.
+  // Voice input. Preferred path: the browser's Web Speech API, which streams
+  // the transcription word-by-word into the composer *while* you speak. Fallback
+  // (Firefox etc.): record a clip and transcribe it via the backend on stop.
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
+  // Composer text present before recording started — live transcript is appended
+  // to this so we never clobber what the user had already typed.
+  const baseInputRef = useRef("");
 
   // Live activity for the in-flight turn.
   const [status, setStatus] = useState("");
@@ -240,8 +247,63 @@ export default function Chat() {
     }
   }
 
-  async function startRecording() {
+  function startRecording() {
     if (recording || streaming || transcribing) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SpeechRecognitionCtor: any =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognitionCtor) {
+      startLiveRecognition(SpeechRecognitionCtor);
+    } else {
+      startBatchRecording();
+    }
+  }
+
+  // Live, word-by-word transcription in the browser (Chrome/Edge/Safari).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function startLiveRecognition(Ctor: any) {
+    const recognition = new Ctor();
+    recognition.lang = navigator.language || "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    // Keep what was already typed; append the transcript after it.
+    baseInputRef.current = input ? input.replace(/\s+$/, "") + " " : "";
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (event: any) => {
+      let finalText = "";
+      let interim = "";
+      for (let i = 0; i < event.results.length; i++) {
+        const res = event.results[i];
+        if (res.isFinal) finalText += res[0].transcript;
+        else interim += res[0].transcript;
+      }
+      setInput(baseInputRef.current + (finalText + interim).replace(/^\s+/, ""));
+    };
+    recognition.onerror = () => {
+      // no-speech / aborted / not-allowed — just end the session gracefully.
+      setRecording(false);
+      recognitionRef.current = null;
+    };
+    recognition.onend = () => {
+      setRecording(false);
+      recognitionRef.current = null;
+      textareaRef.current?.focus();
+    };
+
+    try {
+      recognition.start();
+      recognitionRef.current = recognition;
+      setRecording(true);
+    } catch {
+      // start() throws if already running or mic unavailable — fall back.
+      startBatchRecording();
+    }
+  }
+
+  // Fallback: record a clip, transcribe via the backend (Whisper) once stopped.
+  async function startBatchRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
@@ -280,6 +342,11 @@ export default function Chat() {
   }
 
   function stopRecording() {
+    if (recognitionRef.current) {
+      // Live path: stop() fires onend, which flips `recording` off.
+      recognitionRef.current.stop();
+      return;
+    }
     mediaRecorderRef.current?.stop();
     setRecording(false);
   }
