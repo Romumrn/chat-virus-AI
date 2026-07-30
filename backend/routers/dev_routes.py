@@ -52,8 +52,7 @@ def models(_: dict = Depends(_dev)):
 
 @router.get("/logs")
 def logs(lines: int = 200, _: dict = Depends(_dev)):
-    """Tail of the current month's agent log file (defaults to last 200 lines).
-    The same log the Streamlit error-report feature attached."""
+    """Tail of the current month's agent log file (defaults to last 200 lines)."""
     from datetime import datetime
     lines = max(1, min(lines, 2000))
     path = os.path.join(LOG_DIR, f"agent_{datetime.now().strftime('%Y-%m')}.log")

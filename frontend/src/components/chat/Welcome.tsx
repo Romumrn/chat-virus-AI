@@ -1,8 +1,7 @@
 /**
  * Welcome — the empty-state shown on a new chat. Carries the guidance and
- * clickable example questions from the old Streamlit landing, plus an "About"
- * panel describing the Virome@tlas datasets and tools. Clicking an example
- * sends it straight away.
+ * clickable example questions, plus an "About" panel describing the
+ * Virome@tlas datasets and tools. Clicking an example sends it straight away.
  */
 import { Lightbulb, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui";

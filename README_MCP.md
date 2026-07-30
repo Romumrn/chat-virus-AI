@@ -1,7 +1,7 @@
 # `server_mcp.py` — the ViromeChatMCP server
 
 A [FastMCP](https://gofastmcp.com/) server that owns **all** dataset access, external API calls,
-and business logic for Viromech@t. The Streamlit client ([app.py](app.py), see the main
+and business logic for Viromech@t. The client (the FastAPI backend / React front, see the main
 [README](README.md)) never touches a dataframe, an S3 credential, or a column name directly — it
 only talks to this server over MCP/HTTP, generically, by reading whatever tools and resources it
 currently publishes.
@@ -41,7 +41,7 @@ reads them once per conversation and folds their content into the system prompt.
 | `resource://datasets/host/schema` | JSON map `{column_name: {description, Type}}` for every column of the `host` table | `data/v@_columns_description.csv` |
 | `resource://datasets/taxonomy/schema` | Full JSON schema (name, description, columns, primary key, row definition) of `df_taxo` | `data/TAXONOMY_columns_description.json` |
 
-Adding a new resource (e.g. a third dataset) requires no client-side change: `app.py` discovers
+Adding a new resource (e.g. a third dataset) requires no client-side change: the client discovers
 resources via `list_resources()` and reads each one generically.
 
 ---
@@ -72,7 +72,7 @@ On failure, `content` holds the error message (with retry guidance where possibl
 | `table` | `query_host_sql`, `query_dataframe` | `{"type": "table", "rows": [...], "columns": [...], "total_rows": N}` | Tracked as executed SQL/code in "Sources"; `rows` capped to `preview_rows` |
 | `plotly` | `create_visualization`, `create_map` | `{"type": "plotly", "figure": {...}}` (from `fig.to_json()`, parsed back to a dict) | Rendered with `st.plotly_chart` after `pio.from_json(...)` |
 
-The client (`app.py`) dispatches purely on `artifact["type"]` — never on the tool's name. Adding a
+The client dispatches purely on `artifact["type"]` — never on the tool's name. Adding a
 tool that reuses an existing artifact type (e.g. another `"table"`-returning tool) requires **no
 client change at all**.
 
@@ -155,14 +155,14 @@ To add a new tool:
    `_fail(content)` — never a hand-built dict.
 2. If it produces something the client should render specially (a link, a table, a figure), reuse
    an existing artifact `type` from the table above whenever the shape fits — this means zero
-   client changes. Only invent a new `type` (and wire it into `app.py`'s dispatch loop) if the
+   client changes. Only invent a new `type` (and wire it into the client's dispatch loop) if the
    shape is genuinely new.
 3. Put every usage rule, caveat, and example **in the tool's docstring**. It is sent verbatim to
    the LLM as the tool's description — this is the only place dataset-specific guidance should
-   live; `app.py` and `prompt.py` are deliberately generic and must not encode knowledge about
+   live; the client and `prompt.py` are deliberately generic and must not encode knowledge about
    individual tools or column names.
 4. If the tool needs a UI-configurable default (like `preview_rows` or `wikipedia_limit`), just
-   name the parameter that; `app.py` applies the matching sidebar setting to any tool whose JSON
+   name the parameter that; the client applies the matching expert setting to any tool whose JSON
    schema declares a parameter with that name — no code change needed there either.
 
 ---
@@ -183,4 +183,4 @@ via `load_env_file()` from `config.py`:
 | `S3_URL_STYLE` | no | `path` | DuckDB `s3_url_style` setting |
 
 Non-secret settings (`TAXO_DB_PATH`, default preview row count, default Wikipedia extract length)
-are in `config.py`, shared with `app.py`.
+are in `config.py`, shared with the backend.

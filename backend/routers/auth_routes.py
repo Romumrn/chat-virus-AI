@@ -28,9 +28,9 @@ def _token_response(user: dict) -> TokenOut:
 
 @router.post("/register", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
 def register(body: RegisterIn):
-    """Create an account (same policy as the old Streamlit form) and return a
-    JWT so the user is logged in immediately. New accounts get the 'admin' role
-    only if their email is in ADMIN_EMAILS, else 'user'."""
+    """Create an account and return a JWT so the user is logged in immediately.
+    New accounts get the 'admin' role only if their email is in ADMIN_EMAILS,
+    else 'user'."""
     conn = db.get_conn()
 
     expected_code = os.environ.get("REGISTRATION_CODE", "").strip()

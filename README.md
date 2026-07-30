@@ -8,10 +8,9 @@ A conversational agent for exploring viral taxonomy and virus–host data, built
 tool-calling architecture: the LLM never sees raw data directly, it can only act through a
 small set of audited tools exposed by a separate [MCP server](README_MCP.md).
 
-> **Architecture note** — Viromech@t now runs as a **React front-end + FastAPI backend**
-> (this document). The original single-file Streamlit app (`app.py`) is kept as a **legacy**
-> option during the transition and shares the same database. See [README_API.md](README_API.md)
-> for the API/roles deep-dive and [README_MCP.md](README_MCP.md) for the tool/resource reference.
+> **Architecture note** — Viromech@t runs as a **React front-end + FastAPI backend**
+> (this document). See [README_API.md](README_API.md) for the API/roles deep-dive and
+> [README_MCP.md](README_MCP.md) for the tool/resource reference.
 
 ## Project Context
 
@@ -78,7 +77,7 @@ The backend and the MCP server read their own separate secrets file — see
 * SQL queries against a multi-GB virus–host Parquet dataset on S3, without ever loading it into memory (DuckDB + `httpfs`/`spatial`)
 * Interactive Plotly charts and geographic maps (scroll-to-zoom enabled)
 * Wikipedia and PubMed lookups for biological/clinical background, with mandatory inline citations
-* **Voice input** — record a question with the 🎙️ mic button; transcribed via Albert API's Whisper endpoint
+* **Voice input** — dictate a question with the 🎙️ mic button; transcribed live, word-by-word, in the browser (Web Speech API — Chrome/Edge/Safari)
 * Multi-conversation history (ChatGPT-style sidebar: new / switch / rename / delete), persisted per user in SQLite
 * Sliding conversation memory over the last few Q&A turns (tool-call traces stripped after each turn)
 * **Three roles** — `user` < `dev` < `admin` — with Expert mode, a Dev console, and an Admin console (see [Roles](#roles-accounts))
@@ -135,8 +134,7 @@ saved to SQLite per user, so it survives page reloads and new sessions.
 
 A user account is required — there is no guest mode. Accounts are fully local (no external
 identity provider, no email service): the backend issues a **JWT** on login and stores users in
-the SQLite database (`auth_data/viromechat.db`), with bcrypt-hashed passwords. The bcrypt hashes
-from the legacy Streamlit app remain valid, so existing logins keep working.
+the SQLite database (`auth_data/viromechat.db`), with bcrypt-hashed passwords.
 
 Three roles, ascending privilege — `user` < `dev` < `admin`:
 
@@ -187,9 +185,9 @@ client code change.
 * Read access to the S3-compatible bucket hosting the virus–host Parquet dataset
 
 Python dependencies are split per process under [`requirements/`](requirements/): `api.txt` for the
-FastAPI backend, `mcp.txt` for `server_mcp.py`, both pulling shared packages from `base.txt`
-(`app.txt` is the legacy Streamlit client). `all.txt` combines everything for local dev on one
-host; `dev.txt` adds `pytest` for the [test suite](#testing).
+FastAPI backend, `mcp.txt` for `server_mcp.py`, both pulling shared packages from `base.txt`.
+`all.txt` combines everything for local dev on one host; `dev.txt` adds `pytest` for the
+[test suite](#testing).
 
 ### Configuration
 
@@ -210,8 +208,7 @@ process:
   ```
 
   User accounts need no further configuration — the SQLite database
-  (`auth_data/viromechat.db`) is created automatically on first run, and any pre-existing
-  legacy accounts / chat history are imported into it.
+  (`auth_data/viromechat.db`) is created automatically on first run.
 
 * **`.env.mcp`** — read by `server_mcp.py` (copy from [`.env.mcp.example`](.env.mcp.example)):
 
@@ -258,22 +255,18 @@ with no CORS. Set a real `JWT_SECRET` in `.env.app` first.
 
 ```bash
 docker compose up --build            # mcp + api → http://localhost:8080
-docker compose --profile legacy up   # also brings up the old Streamlit UI on :8501
 ```
 
 * **`docker/Dockerfile.mcp`** → `mcp` service (`server_mcp.py`, port 8000)
 * **`docker/Dockerfile.api`** → `api` service (FastAPI + built SPA, port 8080) — waits for `mcp`'s
   healthcheck before starting, then reaches it at `http://mcp:8000/mcp` (`MCP_SERVER_URL`)
-* **`docker/Dockerfile.app`** → legacy `app` service (Streamlit, port 8501), only under the
-  `legacy` profile
 
 Secrets are excluded from the images by `.dockerignore` — each service loads only its own
 `.env.app` / `.env.mcp` at runtime. The SQLite database lives in a **host bind-mount**
-(`./auth_data/viromechat.db`), shared by the API and the legacy Streamlit app so both can run
-during the transition, and readable/backup-able from the host. Because a bind-mount keeps the host
-directory's ownership — which may not match the container's non-root `app` user (uid 1000) — the
-API container starts from an entrypoint (`docker/entrypoint-api.sh`) that briefly runs as root to
-`chown` the mounted `auth_data/` and `logs/`, then drops privileges to run as `app`.
+(`./auth_data/viromechat.db`), readable/backup-able from the host. Because a bind-mount keeps the
+host directory's ownership — which may not match the container's non-root `app` user (uid 1000) —
+the API container starts from an entrypoint (`docker/entrypoint-api.sh`) that briefly runs as root
+to `chown` the mounted `auth_data/` and `logs/`, then drops privileges to run as `app`.
 
 
 ## Testing

@@ -15,7 +15,7 @@ import json
 import os
 
 import plotly.io as pio
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 import db
@@ -28,7 +28,6 @@ from config import (
 )
 from backend import auth
 from backend.agent import run_agent
-from backend.albert import transcribe_audio
 from backend.reports import save_error_report
 from backend.schemas import ChatIn, ErrorReportIn
 
@@ -66,19 +65,6 @@ def report_error(body: ErrorReportIn, user: dict = Depends(auth.get_current_user
         user_email=user.get("email"),
     )
     return {"ok": True, "id": report_id}
-
-
-@router.post("/transcribe")
-async def transcribe(file: UploadFile, user: dict = Depends(auth.get_current_user)):
-    api_key = _api_key()
-    audio_bytes = await file.read()
-    text = transcribe_audio(audio_bytes, api_key)
-    if not text:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Could not transcribe the recording — please try again or type your question.",
-        )
-    return {"text": text}
 
 
 @router.post("/chat")
@@ -159,7 +145,7 @@ def chat(body: ChatIn, user: dict = Depends(auth.get_current_user)):
             yield _sse({"type": "error", "message": f"Agent failed: {e}"})
 
         # Persist the assistant turn (figures rehydrated to Figure objects so
-        # db.add_message serializes them the same way the Streamlit app did).
+        # db.add_message serializes them uniformly).
         if final_text:
             payload = {}
             if done:

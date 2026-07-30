@@ -4,14 +4,13 @@ Import in any module with: from config import *  or  from config import TAXO_DB_
 
 Secrets/credentials are NOT stored here — they live in two separate,
 gitignored .env files, one per process:
-  - .env.app  (loaded by app.py)         → ALBERT_API_KEY
-  - .env.mcp  (loaded by server_mcp.py)  → S3 credentials (ENDPOINT, ACCESS_KEY, ...)
+  - .env.app  (loaded by backend/main.py) → ALBERT_API_KEY, JWT_SECRET, ...
+  - .env.mcp  (loaded by server_mcp.py)   → S3 credentials (ENDPOINT, ACCESS_KEY, ...)
 See .env.app.example / .env.mcp.example for the expected keys.
 
 A user account is required to use the app — there is no guest mode. Accounts
-are handled entirely locally by streamlit-authenticator, with credentials
-stored in AUTH_CONFIG_PATH — also gitignored, see the ACCOUNTS section in
-app.py.
+live in the SQLite database (DB_PATH), managed by the FastAPI backend
+(backend/auth.py): bcrypt password hashes + stateless JWT sessions.
 """
 
 import os
@@ -23,25 +22,17 @@ LOG_DIR      = "logs"
 APP_ENV_PATH = ".env.app"
 MCP_ENV_PATH = ".env.mcp"
 
-# Kept in its own subdirectory (rather than directly under the app's working
-# directory) so it can be given its own persistent volume in Docker — see
-# docker-compose.yml — without also having to bind-mount the whole app
-# directory just to make this one file survive a container rebuild.
-AUTH_CONFIG_PATH  = os.path.join("auth_data", ".streamlit_auth.yaml")  # legacy local accounts (migrated into DB_PATH on first run)
-USER_HISTORY_DIR  = os.path.join(LOG_DIR, "user_histories")  # legacy per-user chat JSON (migrated into DB_PATH on first run)
-
 # Single SQLite database holding users (email, bcrypt hash, role), their
-# conversations and messages, plus a little app_meta (the streamlit-authenticator
-# cookie config). Lives alongside AUTH_CONFIG_PATH in the already-persistent
-# auth_data/ Docker volume. The legacy YAML + per-user JSON files above are
-# imported into it once (see db.maybe_migrate_legacy_data) and then left alone.
+# conversations and messages, plus a little app_meta (schema version, etc.).
+# Kept in its own subdirectory so it can be given a persistent Docker volume
+# (see docker-compose.yml) without bind-mounting the whole app directory.
 DB_PATH = os.path.join("auth_data", "viromechat.db")
 
 
 # ==================== ROLES & AUTH (React/FastAPI API) ==================== #
-# Three roles, ordered by privilege. The FastAPI backend (backend/) enforces
-# these; the legacy Streamlit app only ever used {user, admin}. 'dev' sits in
-# between: full chat + expert mode + MCP/log introspection, but no user admin.
+# Three roles, ordered by privilege, enforced by the FastAPI backend (backend/).
+# 'dev' sits between user and admin: full chat + expert mode + MCP/log
+# introspection, but no user administration.
 VALID_ROLES = ("user", "dev", "admin")
 ROLE_LEVEL = {"user": 0, "dev": 1, "admin": 2}
 
@@ -57,7 +48,7 @@ def _admin_emails() -> set[str]:
     """Emails granted the 'admin' role, from the ADMIN_EMAILS secret/env
     (comma-separated). Read lazily so tests and the app can set it via env.
     Matching is case-insensitive — emails double as usernames and are stored
-    lower-cased (see _register_user in app.py)."""
+    lower-cased."""
     raw = os.environ.get("ADMIN_EMAILS", "")
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
@@ -84,7 +75,6 @@ def load_env_file(env_path: str) -> None:
 ALBERT_BASE_URL      = "https://albert.api.etalab.gouv.fr/v1"
 ALBERT_TIMEOUT       = 120          # seconds — large models can be slow
 ALBERT_MODEL_DEFAULT = "openai/gpt-oss-120b"  # fallback if model list fails
-ALBERT_WHISPER_MODEL = "openai/whisper-large-v3"  # speech-to-text for the mic input
 
 # The free Albert API is heavily rate-limited (HTTP 429), especially on the
 # large models — retry a few times, honoring the server's Retry-After header
@@ -92,15 +82,11 @@ ALBERT_WHISPER_MODEL = "openai/whisper-large-v3"  # speech-to-text for the mic i
 ALBERT_MAX_RETRIES       = 5
 ALBERT_RETRY_BACKOFF_CAP = 30
 
-# ==================== APP ==================== #
-PAGE_TITLE   = "Virus Dataset AI Agent 🦠"
-PAGE_ICON    = "🦠"
-GITHUB_URL   = "https://github.com/Romumrn/chat-virus-AI"
-
-# Overridable via env var: app.py and server_mcp.py run in separate Docker
-# containers (see docker-compose.yml), where "localhost" no longer points
-# to the other container — compose sets this to http://mcp:8000/mcp there.
-# Local, non-Docker dev (both processes on the same host) keeps the default.
+# ==================== MCP ==================== #
+# Overridable via env var: the backend and server_mcp.py run in separate Docker
+# containers (see docker-compose.yml), where "localhost" no longer points to the
+# other container — compose sets this to http://mcp:8000/mcp there. Local,
+# non-Docker dev (both processes on the same host) keeps the default.
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8000/mcp")
 
 # ==================== AGENT DEFAULTS ==================== #
@@ -120,8 +106,8 @@ DEFAULT_MAX_TOOL_CONTENT = 6000
 
 # How many user questions the model keeps context for before the
 # conversation memory resets. Tool calls/results are stripped from history
-# after each turn (see _clean_history_messages in app.py), so this only
-# bounds the number of user/assistant text exchanges kept.
+# after each turn (see clean_history_messages in backend/albert.py), so this
+# only bounds the number of user/assistant text exchanges kept.
 MAX_CONTEXT_TURNS = 5
 
 # ==================== UI DEFAULTS ==================== #

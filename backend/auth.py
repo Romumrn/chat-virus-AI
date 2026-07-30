@@ -1,17 +1,14 @@
 """
 backend/auth.py — authentication for the FastAPI backend.
 
-Replaces streamlit-authenticator (Streamlit-coupled) with stateless JWT while
-keeping bcrypt as the password engine, so every password_hash already in the
-users table stays valid and existing accounts keep working unchanged.
+Stateless JWT sessions with bcrypt as the password engine.
 
-  - Passwords: bcrypt hash / verify (same scheme the old app stored).
+  - Passwords: bcrypt hash / verify.
   - Sessions: a signed JWT (sub=email, role) issued at login, sent by the
     React app as `Authorization: Bearer <token>`.
   - Guards: get_current_user decodes the token and loads the user; require_role
     builds a dependency enforcing a minimum privilege level (user<dev<admin).
-  - Registration policy (password rules + institutional-email blocklist) is
-    lifted from app.py so the API enforces the exact same rules.
+  - Registration policy: password rules + institutional-email blocklist.
 """
 
 import re
@@ -111,7 +108,7 @@ def require_role(min_role: str):
     return _guard
 
 
-# ==================== REGISTRATION POLICY (from app.py) ====================
+# ==================== REGISTRATION POLICY ====================
 
 _BLOCKED_EMAIL_DOMAINS = {
     "gmail.com", "googlemail.com",
@@ -145,7 +142,7 @@ def password_problem(password: str) -> str | None:
 
 def email_problem(email: str) -> str | None:
     """Validate the email shape and reject free-webmail domains (institutional
-    addresses only), matching app.py. Returns None if acceptable."""
+    addresses only). Returns None if acceptable."""
     if "@" not in email or "." not in email.split("@")[-1]:
         return "Please enter a valid email address."
     domain = email.split("@")[-1]

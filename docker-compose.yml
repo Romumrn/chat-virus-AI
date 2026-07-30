@@ -37,9 +37,8 @@ services:
       retries: 10
       start_period: 15s
 
-  # FastAPI backend + built React SPA (one origin). This is the primary
-  # front-end now; it shares the SQLite DB in ./auth_data with the legacy
-  # Streamlit app below, so both can run during the transition.
+  # FastAPI backend + built React SPA (one origin). This is the app front-end;
+  # the SQLite DB lives in ./auth_data (host bind-mount, persistent).
   api:
     build:
       context: .
@@ -57,45 +56,12 @@ services:
       - .env.app
     volumes:
       - ./logs:/app/logs
-      # Same host bind-mount as the Streamlit app: the SQLite DB lives at
-      # ./auth_data/viromechat.db. See the note on the app service below.
+      # Host bind-mount: the SQLite DB lives at ./auth_data/viromechat.db so it
+      # can be backed up without going through the container. The directory is
+      # tracked in git (auth_data/.gitkeep) so it exists before the first "up".
       - ./auth_data:/app/auth_data
     ports:
       - "8080:8080"
-    depends_on:
-      mcp:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # Legacy Streamlit UI — kept for the transition but no longer started by
-  # default. Bring it up explicitly with: docker compose --profile legacy up
-  app:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.app
-    container_name: virus-ai-agent
-    profiles: ["legacy"]
-    environment:
-      - STREAMLIT_BROWSER_GATHERUSAGESTATS=false
-      # app.py and server_mcp.py are now separate containers — "localhost"
-      # would no longer reach the MCP server, so point it at the "mcp"
-      # service by its Compose network name instead.
-      - MCP_SERVER_URL=http://mcp:8000/mcp
-    env_file:
-      - .env.app
-    volumes:
-      - ./logs:/app/logs
-      - ./.streamlit:/app/.streamlit:ro
-      # Host bind-mount: the accounts file lives directly on the VM at
-      # ./auth_data/.streamlit_auth.yaml, so it can be read/edited/backed up
-      # without going through the container. The directory is tracked in git
-      # (auth_data/.gitkeep) so it exists — owned by the host user — before
-      # the first "up"; the container's app user is uid 1000, which matches
-      # the default first user on an Ubuntu VM. If accounts fail to save with
-      # a PermissionError on some host, run: sudo chown -R 1000:1000 auth_data
-      - ./auth_data:/app/auth_data
-    ports:
-      - "8501:8501"
     depends_on:
       mcp:
         condition: service_healthy

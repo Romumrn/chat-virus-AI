@@ -16,11 +16,10 @@ frontend/dist/
 .env
 .env.app
 .env.mcp
-.streamlit/secrets.toml
 
-# Local user accounts (usernames, bcrypt-hashed passwords, cookie key):
+# Local user accounts (SQLite DB: usernames, bcrypt-hashed passwords, roles):
 # keep the directory tracked (so the Docker bind-mount has a host dir owned
-# by the host user before first run) but never commit the credentials file.
+# by the host user before first run) but never commit the database file.
 auth_data/*
 !auth_data/.gitkeep
 test_neo4j.ipynb

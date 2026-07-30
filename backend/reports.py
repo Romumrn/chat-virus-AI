@@ -54,7 +54,7 @@ def save_error_report(
         recent_logs=related_logs,
     )
 
-    # Backup: a self-contained JSON file (same shape as the old Streamlit app).
+    # Backup: a self-contained JSON file alongside the DB record.
     try:
         os.makedirs(REPORT_DIR, exist_ok=True)
         report_path = os.path.join(

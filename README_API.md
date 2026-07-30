@@ -1,18 +1,16 @@
 # Viromech@t — React front-end + FastAPI backend
 
-This is the new architecture that replaces the single-file Streamlit app
-(`app.py`). Three moving parts:
+Three moving parts:
 
 | Component | Path | Port | Role |
 |-----------|------|------|------|
-| **MCP server** | `server_mcp.py` | 8000 | Data & tools (unchanged) |
+| **MCP server** | `server_mcp.py` | 8000 | Data & tools |
 | **API** | `backend/` (FastAPI) | 8080 | REST + SSE, auth (JWT), roles |
 | **Front** | `frontend/` (React + Vite + TS) | 5173 (dev) | Chat, Account, Admin, Dev UI |
 
-The API reuses the root modules **unchanged**: `db.py` (SQLite persistence),
-`config.py`, `prompt.py`, `logging_utils.py`. The agent loop and the ALBERT/MCP
-helpers were extracted from `app.py` into `backend/agent.py` and
-`backend/albert.py`.
+The API reuses the root modules `db.py` (SQLite persistence), `config.py`,
+`prompt.py`, `logging_utils.py`. The agent loop lives in `backend/agent.py` and
+the ALBERT/MCP helpers in `backend/albert.py`.
 
 ## Roles
 
@@ -25,9 +23,8 @@ Three roles, ascending privilege — `user` < `dev` < `admin`:
   roles, delete users, platform stats, and read any user's conversations.
 
 Bootstrap the first admin with `ADMIN_EMAILS` in `.env.app` (that email gets
-`admin` on registration); admins then promote others from the UI. Existing
-accounts and their bcrypt password hashes keep working — the API verifies the
-same hashes the Streamlit app stored.
+`admin` on registration); admins then promote others from the UI. Passwords are
+stored as bcrypt hashes and verified on login.
 
 ## Run in development
 
@@ -61,10 +58,9 @@ Two containers (mcp + api); the API also serves the built React SPA, so it is a
 single origin with no CORS. Set a real `JWT_SECRET` in `.env.app` first.
 ```bash
 docker compose up --build          # starts mcp + api → http://localhost:8080
-docker compose --profile legacy up # also brings up the old Streamlit UI (8501)
 ```
-Both the API and the legacy Streamlit app share the same SQLite database
-(`auth_data/viromechat.db`), so they can run side by side during the migration.
+The SQLite database (`auth_data/viromechat.db`) lives in a host bind-mount, so
+it survives rebuilds and is backup-able from the host.
 
 ## API surface
 
@@ -74,8 +70,9 @@ Both the API and the legacy Streamlit app share the same SQLite database
   tool_result / figure / sources / final). Consumed by the front via
   `fetch()` + `ReadableStream` (EventSource can't send the Bearer header).
 - `GET/POST/PATCH/DELETE /api/conversations[/{id}]`, `GET /api/conversations/{id}/messages`
+- `POST /api/report` — submit a "Report an error" for an answer (stored in the DB for dev triage)
 - `GET /api/admin/stats`, `GET /api/admin/users`, `PUT /api/admin/users/{email}/role`,
   `DELETE /api/admin/users/{email}`, `GET /api/admin/users/{email}/conversations`,
   `GET /api/admin/conversations/{id}/messages` (admin only)
 - `GET /api/dev/mcp/tools`, `POST /api/dev/mcp/call`, `GET /api/dev/models`,
-  `GET /api/dev/logs` (dev+ only)
+  `GET /api/dev/logs`, `GET /api/dev/reports`, `PATCH /api/dev/reports/{id}` (dev+ only)

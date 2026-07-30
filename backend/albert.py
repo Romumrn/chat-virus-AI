@@ -1,11 +1,10 @@
 """
-backend/albert.py — ALBERT + MCP helper functions, extracted verbatim (logic
-unchanged) from the Streamlit app.py. None of these touch Streamlit; they are
-the reusable core the FastAPI agent loop (backend.agent) builds on.
+backend/albert.py — ALBERT + MCP helper functions: the reusable core the
+FastAPI agent loop (backend.agent) builds on.
 
 Contains:
   - HTTP plumbing for the ALBERT (Etalab) OpenAI-compatible API: headers, model
-    listing, Whisper transcription, and the rate-limit-aware chat call.
+    listing, and the rate-limit-aware chat call.
   - MCP glue: convert MCP tool specs to OpenAI format, unwrap tool results,
     read dataset-description resources.
   - Output guards: strip hallucinated PMIDs and fake citation markers.
@@ -19,7 +18,7 @@ import time
 import requests
 
 from config import (
-    ALBERT_BASE_URL, ALBERT_TIMEOUT, ALBERT_MODEL_DEFAULT, ALBERT_WHISPER_MODEL,
+    ALBERT_BASE_URL, ALBERT_TIMEOUT, ALBERT_MODEL_DEFAULT,
     ALBERT_MAX_RETRIES, ALBERT_RETRY_BACKOFF_CAP, LOG_DIR,
 )
 from logging_utils import setup_logger
@@ -62,27 +61,6 @@ def list_albert_models(api_key: str) -> list:
     except Exception as e:
         logger.warning(f"MODEL_LIST_FAIL | {e} — using default model")
         return [ALBERT_MODEL_DEFAULT]
-
-
-def transcribe_audio(audio_bytes: bytes, api_key: str) -> str:
-    """Transcribe recorded audio to text via ALBERT's Whisper endpoint.
-    Returns '' on failure so the caller can fall back to typed input."""
-    try:
-        r = requests.post(
-            f"{ALBERT_BASE_URL}/audio/transcriptions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            files={"file": ("recording.wav", audio_bytes, "audio/wav")},
-            data={"model": ALBERT_WHISPER_MODEL},
-            timeout=ALBERT_TIMEOUT,
-        )
-        r.raise_for_status()
-        text = (r.json().get("text") or "").strip()
-        if not text:
-            logger.warning("WHISPER_EMPTY | transcription returned empty text")
-        return text
-    except Exception as e:
-        logger.error(f"WHISPER_FAIL | {e}")
-        return ""
 
 
 def albert_chat(

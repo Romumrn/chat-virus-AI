@@ -1,6 +1,6 @@
 # MCP data server (server_mcp.py) — owns the taxonomy CSV and the S3 host
 # Parquet dataset (via DuckDB), exposes them as MCP tools/resources over
-# HTTP. See Dockerfile.app for the Streamlit client that talks to it.
+# HTTP. See Dockerfile.api for the backend client that talks to it.
 # Build from the repo root: docker build -f docker/Dockerfile.mcp .
 
 FROM python:3.11-slim

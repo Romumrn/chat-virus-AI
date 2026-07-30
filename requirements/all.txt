@@ -1,4 +1,5 @@
 # Combined dependencies for local, non-Docker dev running both processes
-# (app.py and server_mcp.py) on one host: pip install -r requirements/all.txt
--r app.txt
+# (the backend/ FastAPI app and server_mcp.py) on one host:
+#   pip install -r requirements/all.txt
+-r api.txt
 -r mcp.txt

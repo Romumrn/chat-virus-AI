@@ -4,7 +4,7 @@ def build_system_prompt(datasets_description: str = "") -> str:
     Build the system prompt for the virology agent.
 
     datasets_description is raw text assembled from whatever resources the
-    MCP server currently publishes (see app.py:_describe_available_datasets).
+    MCP server currently publishes (see backend/albert.py:describe_available_datasets).
     This app deliberately does not know the shape of that content — column
     names, dataset semantics, and usage caveats are owned by the MCP server
     (its resources and tool docstrings), not by this client.

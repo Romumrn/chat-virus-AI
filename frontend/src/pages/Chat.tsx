@@ -63,13 +63,9 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
 
-  // Voice input. Preferred path: the browser's Web Speech API, which streams
-  // the transcription word-by-word into the composer *while* you speak. Fallback
-  // (Firefox etc.): record a clip and transcribe it via the backend on stop.
+  // Voice input via the browser's Web Speech API: the transcription streams
+  // word-by-word into the composer *while* you speak (Chrome/Edge/Safari).
   const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
@@ -247,22 +243,16 @@ export default function Chat() {
     }
   }
 
+  // Live, word-by-word voice transcription via the browser's Web Speech API
+  // (Chrome/Edge/Safari). Interim results stream into the composer as you speak.
   function startRecording() {
-    if (recording || streaming || transcribing) return;
+    if (recording || streaming) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SpeechRecognitionCtor: any =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognitionCtor) {
-      startLiveRecognition(SpeechRecognitionCtor);
-    } else {
-      startBatchRecording();
-    }
-  }
+    if (!SpeechRecognitionCtor) return; // unsupported browser (e.g. Firefox) — type instead
 
-  // Live, word-by-word transcription in the browser (Chrome/Edge/Safari).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function startLiveRecognition(Ctor: any) {
-    const recognition = new Ctor();
+    const recognition = new SpeechRecognitionCtor();
     recognition.lang = navigator.language || "en-US";
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -297,58 +287,13 @@ export default function Chat() {
       recognitionRef.current = recognition;
       setRecording(true);
     } catch {
-      // start() throws if already running or mic unavailable — fall back.
-      startBatchRecording();
-    }
-  }
-
-  // Fallback: record a clip, transcribe via the backend (Whisper) once stopped.
-  async function startBatchRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        setTranscribing(true);
-        try {
-          const { text } = await api.postFile<{ text: string }>(
-            "/api/transcribe",
-            blob,
-            "recording.webm",
-          );
-          // Drop the transcription into the composer (like Claude Code) so the
-          // user can review/edit it before sending, instead of auto-sending.
-          if (text) {
-            setInput((prev) => (prev ? `${prev.replace(/\s+$/, "")} ${text}` : text));
-            textareaRef.current?.focus();
-          }
-        } catch {
-          // transcription failed server-side — let the user type instead
-        } finally {
-          setTranscribing(false);
-        }
-      };
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setRecording(true);
-    } catch {
-      // mic permission denied or unavailable — silently no-op, user can type
+      // start() throws if already running — ignore.
     }
   }
 
   function stopRecording() {
-    if (recognitionRef.current) {
-      // Live path: stop() fires onend, which flips `recording` off.
-      recognitionRef.current.stop();
-      return;
-    }
-    mediaRecorderRef.current?.stop();
-    setRecording(false);
+    // stop() fires onend, which flips `recording` off and keeps the final text.
+    recognitionRef.current?.stop();
   }
 
   return (
@@ -649,23 +594,17 @@ export default function Chat() {
               placeholder={recording ? "Recording… speak your question" : "Ask about a virus, host, or dataset…"}
               rows={1}
               className="max-h-40 min-h-[2.5rem] flex-1 resize-none"
-              disabled={streaming || recording || transcribing}
+              disabled={streaming || recording}
             />
             <Button
               variant={recording ? "primary" : "outline"}
               size="icon"
               onClick={() => (recording ? stopRecording() : startRecording())}
-              disabled={streaming || transcribing}
+              disabled={streaming}
               title={recording ? "Stop recording" : "Ask by voice"}
               className={recording ? "animate-pulse" : undefined}
             >
-              {transcribing ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : recording ? (
-                <Square className="h-4 w-4" />
-              ) : (
-                <Mic className="h-4 w-4" />
-              )}
+              {recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </Button>
             <Button size="icon" onClick={() => send()} disabled={streaming || !input.trim()}>
               {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

@@ -1,9 +1,8 @@
 """
-backend/agent.py — the agentic loop, extracted from app.py's albert_agent_loop
-and refactored into an async generator of structured events.
+backend/agent.py — the agentic loop, an async generator of structured events.
 
-Where the Streamlit version pushed UI updates through a `status_container` and
-returned a tuple at the end, this version `yield`s events as they happen:
+Rather than returning a single tuple at the end, the loop `yield`s events as
+they happen, which the chat endpoint streams to the browser over SSE:
 
     {"type": "status",      "text": str}
     {"type": "tool_call",   "name": str, "keyword": str, "icon": str, "label": str}
@@ -18,7 +17,7 @@ returned a tuple at the end, this version `yield`s events as they happen:
 
 The terminal "done" event carries everything the caller needs to persist the
 turn (via db.add_message) — figures are plotly JSON dicts there. The loop never
-touches the database or Streamlit.
+touches the database.
 """
 
 # stdlib: used to serialize/deserialize plotly figures and tool-call arguments
@@ -41,7 +40,7 @@ from config import (
 )
 # Builds the system prompt text, injected with a description of available datasets
 from prompt import build_system_prompt
-# ALBERT (the LLM backend) client + assorted helpers shared with the Streamlit app
+# ALBERT (the LLM backend) client + assorted helpers
 from backend.albert import (
     albert_chat, AlbertRateLimitError,
     mcp_tools_to_openai_spec, unwrap_mcp_result, describe_available_datasets,
@@ -83,9 +82,7 @@ async def run_agent(
     history_messages: list | None = None,
 ):
     """Async generator running the tool-calling loop against ALBERT + MCP,
-    yielding events (see module docstring). Logic mirrors app.py's
-    albert_agent_loop; only the I/O surface changed (events instead of a
-    Streamlit container + a final tuple)."""
+    yielding events as they happen (see module docstring)."""
 
     # Accumulators for citation/source links collected across all tool calls in this turn
     used_wikipedia_urls: list = []

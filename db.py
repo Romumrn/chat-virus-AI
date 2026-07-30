@@ -3,45 +3,31 @@ db.py — SQLite persistence for Viromech@t.
 
 A single database (config.DB_PATH) holds everything that must survive restarts:
 
-  - app_meta      : key/value — the streamlit-authenticator cookie config
-                    (name/key/expiry) and the schema version.
+  - app_meta      : key/value — the schema version (and any future settings).
   - users         : email (PK), first/last name, bcrypt password_hash, role
-                    ('user' | 'admin'), created_at, last_login.
+                    ('user' | 'dev' | 'admin'), created_at, last_login.
   - conversations : one row per chat thread, owned by a user.
   - messages      : the individual turns of a conversation (role, content, and
                     a JSON payload carrying figures / source URLs / executed code).
+  - error_reports : user-submitted "Report an error" feedback for dev triage.
 
-streamlit-authenticator stays the crypto/cookie/session engine — this module
-only stores and retrieves. Passwords are ALWAYS bcrypt-hashed: never written or
+This module only stores and retrieves — the FastAPI backend (backend/auth.py) is
+the crypto/session engine. Passwords are ALWAYS bcrypt-hashed: never written or
 returned in clear, and never surfaced to the admin view.
 
-The first time the DB is empty, maybe_migrate_legacy_data() imports the previous
-YAML accounts (AUTH_CONFIG_PATH) and the per-user chat JSON files
-(USER_HISTORY_DIR), preserving bcrypt hashes and the cookie key so existing
-logins and cookies keep working. The import is idempotent — it only runs while
-the users table is empty, so calling it on every startup is safe.
-
-No Streamlit import here on purpose: db.py must be usable from plain pytest.
-One process-wide connection per database path is shared across Streamlit reruns
-and sessions; writes are serialized with a lock and WAL keeps reads concurrent.
+One process-wide connection per database path is shared across requests; writes
+are serialized with a lock and WAL keeps reads concurrent.
 """
 
 import json
 import os
-import re
-import secrets as _secrets
 import sqlite3
 import threading
 from datetime import datetime, timezone
 
 import plotly.io as pio
 
-from config import (
-    DB_PATH,
-    AUTH_CONFIG_PATH,
-    USER_HISTORY_DIR,
-    _admin_emails,
-)
+from config import DB_PATH
 
 SCHEMA_VERSION = "1"
 
@@ -60,9 +46,9 @@ def _now() -> str:
 def get_conn(db_path: str | None = None) -> sqlite3.Connection:
     """
     Return a process-wide shared connection for db_path (default: config.DB_PATH),
-    creating it — and its schema — on first use. Streamlit imports this module
-    once, so the cached connection persists across reruns and is shared by every
-    session; writes go through _write_lock and WAL mode keeps reads concurrent.
+    creating it — and its schema — on first use. The cached connection is shared
+    across requests; writes go through _write_lock and WAL mode keeps reads
+    concurrent.
 
     Passing an explicit db_path (a tmp file, or ":memory:") is how tests get an
     isolated database.
@@ -83,11 +69,8 @@ def get_conn(db_path: str | None = None) -> sqlite3.Connection:
 
 
 def init_db(db_path: str | None = None) -> sqlite3.Connection:
-    """Open (creating if needed) the database and run the one-time legacy
-    migration. Call once at app startup."""
-    conn = get_conn(db_path)
-    maybe_migrate_legacy_data(conn)
-    return conn
+    """Open (creating if needed) the database. Call once at app startup."""
+    return get_conn(db_path)
 
 
 def _init_schema(conn: sqlite3.Connection) -> None:
@@ -143,7 +126,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         set_meta(conn, "schema_version", SCHEMA_VERSION)
 
 
-# ==================== APP META (cookie config, versions) ====================
+# ==================== APP META (schema version, settings) ====================
 
 def get_meta(conn: sqlite3.Connection, key: str, default=None):
     row = conn.execute("SELECT value FROM app_meta WHERE key = ?", (key,)).fetchone()
@@ -158,21 +141,6 @@ def set_meta(conn: sqlite3.Connection, key: str, value) -> None:
             (key, str(value)),
         )
         conn.commit()
-
-
-def get_cookie_config(conn: sqlite3.Connection) -> tuple[str, str, float]:
-    """(cookie_name, cookie_key, expiry_days) for streamlit-authenticator.
-    On a brand-new DB with no migrated YAML cookie, a random signing key is
-    generated once and persisted so sessions stay valid across restarts."""
-    name = get_meta(conn, "cookie_name") or "viromechat_auth"
-    key = get_meta(conn, "cookie_key")
-    if not key:
-        key = _secrets.token_hex(32)
-        set_meta(conn, "cookie_name", name)
-        set_meta(conn, "cookie_key", key)
-        set_meta(conn, "cookie_expiry_days", "30")
-    expiry = get_meta(conn, "cookie_expiry_days") or "30"
-    return name, key, float(expiry)
 
 
 # ==================== USERS ====================
@@ -222,24 +190,6 @@ def set_role(conn: sqlite3.Connection, email: str, role: str) -> None:
     with _write_lock:
         conn.execute("UPDATE users SET role = ? WHERE email = ?", (role, email.lower()))
         conn.commit()
-
-
-def build_credentials_dict(conn: sqlite3.Connection) -> dict:
-    """Build the credentials dict streamlit-authenticator expects, from the
-    users table. Rebuilt fresh on each run — streamlit-authenticator mutates
-    its own copy (logged_in, failed_login_attempts) but never persists here."""
-    creds: dict = {"usernames": {}}
-    for row in conn.execute("SELECT * FROM users"):
-        creds["usernames"][row["email"]] = {
-            "email": row["email"],
-            "first_name": row["first_name"] or "",
-            "last_name": row["last_name"] or "",
-            "password": row["password_hash"],
-            "logged_in": False,
-            "roles": None,
-            "failed_login_attempts": 0,
-        }
-    return creds
 
 
 def list_users_with_counts(conn: sqlite3.Connection) -> list[dict]:
@@ -359,8 +309,7 @@ def delete_conversation(conn: sqlite3.Connection, conversation_id: int) -> None:
 #
 # Everything on a message besides role/content is stored as JSON in
 # messages.payload_json. Plotly figures are serialized with fig.to_json() and
-# rehydrated with pio.from_json — mirroring the previous per-user-JSON
-# persistence (see the old _load/_save_user_history in app.py).
+# rehydrated with pio.from_json.
 
 _PAYLOAD_KEYS = ("figures", "wikipedia_urls", "pubmed_urls", "ncbi_urls", "executed_codes")
 
@@ -523,96 +472,3 @@ def update_error_report_status(
         return cur.rowcount > 0
 
 
-# ==================== ONE-TIME LEGACY MIGRATION ====================
-
-def _sanitize_email(email: str) -> str:
-    """Same sanitization the old _user_history_path used to turn an email into
-    a filename (e.g. romuald.marin@cnrs.fr -> romuald.marin_cnrs.fr)."""
-    return re.sub(r"[^a-zA-Z0-9_.-]", "_", email)
-
-
-def _match_history_file_to_user(fname: str, emails: list[str]) -> str | None:
-    stem = fname[:-5] if fname.endswith(".json") else fname
-    for e in emails:
-        if _sanitize_email(e) == stem:
-            return e
-    return None
-
-
-def maybe_migrate_legacy_data(
-    conn: sqlite3.Connection,
-    auth_config_path: str | None = None,
-    user_history_dir: str | None = None,
-) -> bool:
-    """
-    Import the pre-DB YAML accounts and per-user chat JSON the first time the
-    users table is empty. Preserves bcrypt hashes and the cookie key/name so
-    existing logins and re-auth cookies keep working. Idempotent: a no-op once
-    any user exists. Returns True if a migration actually ran.
-    """
-    n_users = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
-    if n_users > 0:
-        return False
-
-    auth_path = auth_config_path or AUTH_CONFIG_PATH
-    hist_dir = user_history_dir or USER_HISTORY_DIR
-    admins = _admin_emails()
-
-    imported_emails: list[str] = []
-
-    if os.path.exists(auth_path):
-        try:
-            import yaml
-            with open(auth_path) as f:
-                cfg = yaml.safe_load(f) or {}
-        except Exception:
-            cfg = {}
-
-        # Preserve the existing cookie so current re-auth cookies stay valid.
-        cookie = cfg.get("cookie") or {}
-        if cookie.get("name"):
-            set_meta(conn, "cookie_name", cookie["name"])
-        if cookie.get("key"):
-            set_meta(conn, "cookie_key", cookie["key"])
-        if cookie.get("expiry_days") is not None:
-            set_meta(conn, "cookie_expiry_days", str(cookie["expiry_days"]))
-
-        usernames = (cfg.get("credentials") or {}).get("usernames") or {}
-        for email, u in usernames.items():
-            email_l = str(email).lower()
-            if not u.get("password"):
-                continue  # nothing usable to migrate for this account
-            role = "admin" if email_l in admins else "user"
-            create_user(
-                conn, email_l,
-                u.get("first_name", ""), u.get("last_name", ""),
-                u.get("password", ""), role,
-            )
-            imported_emails.append(email_l)
-
-    # Import each user's single legacy conversation (one JSON file per user).
-    if os.path.isdir(hist_dir):
-        for fname in sorted(os.listdir(hist_dir)):
-            if not fname.endswith(".json"):
-                continue
-            email_l = _match_history_file_to_user(fname, imported_emails)
-            if email_l is None:
-                continue
-            try:
-                with open(os.path.join(hist_dir, fname)) as f:
-                    data = json.load(f)
-            except Exception:
-                continue
-            messages = data.get("messages") or []
-            if not messages:
-                continue
-            cid = create_conversation(conn, email_l, "Historique importé")
-            for m in messages:
-                mm = dict(m)
-                # Legacy files store figures as JSON strings — turn them back
-                # into Figure objects so add_message serializes them uniformly.
-                if "figures" in mm:
-                    mm["figures"] = [pio.from_json(fj) for fj in mm["figures"]]
-                add_message(conn, cid, mm.get("role", "user"), mm.get("content", ""), mm)
-
-    return True

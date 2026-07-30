@@ -83,10 +83,10 @@ function Sources({ msg }: { msg: ChatMessage }) {
 }
 
 /**
- * ReportError — the "Report an error" control from the Streamlit app: a button
- * that opens an optional-comment box and POSTs the question/answer/code to
- * /api/report. Only shown for assistant turns in the live chat (when `question`
- * is provided), never in the read-only admin viewer.
+ * ReportError — the "Report an error" control: a button that opens an
+ * optional-comment box and POSTs the question/answer/code to /api/report.
+ * Only shown for assistant turns in the live chat (when `question` is
+ * provided), never in the read-only admin viewer.
  */
 function ReportError({ msg, question }: { msg: ChatMessage; question: string }) {
   const [open, setOpen] = useState(false);
