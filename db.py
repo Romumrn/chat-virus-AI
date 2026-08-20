@@ -116,9 +116,21 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             created_at     TEXT,
             updated_at     TEXT
         );
+        CREATE TABLE IF NOT EXISTS helper_scores (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_email   TEXT REFERENCES users(email) ON DELETE SET NULL,
+            virus        TEXT,
+            days         INTEGER,
+            infected_pct REAL,      -- 0..1 population-weighted world coverage
+            dead         INTEGER,   -- absolute death toll (people)
+            won          INTEGER NOT NULL DEFAULT 0,  -- 0/1
+            score        INTEGER NOT NULL,
+            created_at   TEXT
+        );
         CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_email);
         CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
         CREATE INDEX IF NOT EXISTS idx_error_reports_status ON error_reports(status);
+        CREATE INDEX IF NOT EXISTS idx_helper_scores_score ON helper_scores(score DESC);
         """
     )
     conn.commit()
@@ -470,5 +482,48 @@ def update_error_report_status(
         )
         conn.commit()
         return cur.rowcount > 0
+
+
+# ==================== HELPER SCORES (contagion mini-game) =====================
+
+def add_helper_score(
+    conn: sqlite3.Connection,
+    user_email: str | None,
+    virus: str,
+    days: int,
+    infected_pct: float,
+    dead: int,
+    won: bool,
+    score: int,
+) -> int:
+    """Record one finished game and return its row id."""
+    with _write_lock:
+        cur = conn.execute(
+            "INSERT INTO helper_scores(user_email, virus, days, infected_pct, dead, won, score, created_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                user_email.lower() if user_email else None,
+                virus,
+                days,
+                infected_pct,
+                dead,
+                1 if won else 0,
+                score,
+                _now(),
+            ),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def top_helper_scores(conn: sqlite3.Connection, limit: int = 5) -> list[sqlite3.Row]:
+    """Highest scores across all users, best first. Joins the player's name."""
+    return conn.execute(
+        "SELECT h.score, h.virus, h.days, h.infected_pct, h.dead, h.created_at, "
+        "       h.user_email, u.first_name, u.last_name "
+        "FROM helper_scores h LEFT JOIN users u ON u.email = h.user_email "
+        "ORDER BY h.score DESC, h.days ASC LIMIT ?",
+        (limit,),
+    ).fetchall()
 
 

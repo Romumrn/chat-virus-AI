@@ -4,9 +4,9 @@ backend/main.py — FastAPI application entry point.
 Run locally:  uvicorn backend.main:app --reload --port 8080
 (from the repo root, so `import db`, `import config`, ... resolve).
 
-Assembles the routers, initializes the SQLite DB (running the idempotent legacy
-migration), enables CORS for the Vite dev server, and — in production — serves
-the built React SPA from frontend/dist so the whole product is one origin.
+Assembles the routers, initializes the SQLite DB, enables CORS for the Vite dev
+server, and — in production — serves the built React SPA from frontend/dist so
+the whole product is one origin.
 """
 
 import os
@@ -25,6 +25,7 @@ load_env_file(APP_ENV_PATH)
 
 from backend.routers import (  # noqa: E402  (import after env is loaded)
     auth_routes, chat_routes, conversation_routes, admin_routes, dev_routes,
+    helper_routes,
 )
 
 app = FastAPI(title="Viromech@t API", version="1.0.0")
@@ -54,7 +55,7 @@ def health():
 
 
 for r in (auth_routes.router, chat_routes.router, conversation_routes.router,
-          admin_routes.router, dev_routes.router):
+          admin_routes.router, dev_routes.router, helper_routes.router):
     app.include_router(r)
 
 

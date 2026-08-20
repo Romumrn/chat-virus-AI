@@ -24,7 +24,19 @@ import { Button, Card, Input, Select, Textarea } from "@/components/ui";
 import MessageBubble from "@/components/chat/MessageBubble";
 import PlotlyFigure from "@/components/chat/PlotlyFigure";
 import Welcome from "@/components/chat/Welcome";
+import HelperChat from "@/components/helperchat/HelperChat";
 import { cn } from "@/lib/utils";
+
+// Normalize a composer string for command matching: lowercased, accent-free,
+// collapsed whitespace. Keeps the trigger robust to typing variations.
+function normalizeCmd(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 interface LiveTool {
   name: string;
@@ -62,6 +74,9 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+
+  // In-app helper overlay, opened by a specific composer command.
+  const [helperOpen, setHelperOpen] = useState(false);
 
   // Voice input via the browser's Web Speech API: the transcription streams
   // word-by-word into the composer *while* you speak (Chrome/Edge/Safari).
@@ -143,6 +158,14 @@ export default function Chat() {
   async function send(override?: string) {
     const text = (override ?? input).trim();
     if (!text || streaming) return;
+
+    // Command hook: open the in-app helper instead of sending to the backend.
+    if (normalizeCmd(text) === "lance la pandemie") {
+      setInput("");
+      setHelperOpen(true);
+      return;
+    }
+
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
     setStreaming(true);
@@ -612,6 +635,8 @@ export default function Chat() {
           </div>
         </div>
       </div>
+
+      {helperOpen && <HelperChat onClose={() => setHelperOpen(false)} />}
     </div>
   );
 }
