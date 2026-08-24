@@ -9,7 +9,8 @@ import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-dist-min";
 import { COUNTRIES } from "./helperData";
 import { CITIES } from "./helperCities";
-import { biggestCityIn } from "./helperEngine";
+import { UNIVERSITIES } from "./helperUniversities";
+import { biggestCityIn, CITY_BIOME } from "./helperEngine";
 import { geoBlock, MAP_MARGIN } from "./helperMapLayout";
 
 const Plot = createPlotlyComponent(Plotly);
@@ -32,6 +33,11 @@ const CITY_SIZE = CITIES.map((c) => Math.max(3, Math.min(18, Math.sqrt(c.pop) / 
 // Faded base countries, uniform colour, drawn only for context + click target.
 const COUNTRY_LOC = COUNTRIES.map((c) => c.iso3);
 const COUNTRY_Z = COUNTRIES.map(() => 0);
+
+// Research universities (static overlay).
+const UNI_LAT = UNIVERSITIES.map((u) => u.lat);
+const UNI_LON = UNIVERSITIES.map((u) => u.lng);
+const UNI_TEXT = UNIVERSITIES.map((u) => u.short);
 
 function HelperMap({
   cityInf,
@@ -68,7 +74,7 @@ function HelperMap({
           lat: CITY_LAT,
           lon: CITY_LON,
           text: CITY_TEXT,
-          customdata: cityInf,
+          customdata: cityInf.map((v, i) => [v, CITY_BIOME[i]]),
           marker: {
             size: CITY_SIZE,
             color: cityInf,
@@ -78,7 +84,18 @@ function HelperMap({
             opacity: 0.9,
             line: { width: 0 },
           },
-          hovertemplate: "%{text}<br>Contamination : %{customdata:.0%}<extra></extra>",
+          hovertemplate:
+            "%{text}<br>Biome : %{customdata[1]}<br>Contamination : %{customdata[0]:.0%}<extra></extra>",
+        } as any,
+        {
+          type: "scattergeo",
+          mode: "text",
+          lat: UNI_LAT,
+          lon: UNI_LON,
+          text: UNIVERSITIES.map(() => "🎓"),
+          customdata: UNI_TEXT,
+          textfont: { size: 13 },
+          hovertemplate: "🎓 %{customdata}<br>Recherche un vaccin<extra></extra>",
         } as any,
       ]}
       layout={
@@ -89,6 +106,7 @@ function HelperMap({
           plot_bgcolor: "rgba(0,0,0,0)",
           clickmode: "event",
           dragmode: false,
+          showlegend: false,
           geo: geoBlock(true),
           font: { color: "#cbd5e1" },
         } as any
@@ -101,9 +119,10 @@ function HelperMap({
           ? (e: any) => {
               const pt = e?.points?.[0];
               if (!pt) return;
-              // A city dot (scattergeo) → that exact city; a country (choropleth)
-              // → its most populous city.
-              if (pt.data?.type === "scattergeo" && typeof pt.pointNumber === "number") {
+              // curveNumber 1 = the city dots → that exact city; curveNumber 0 =
+              // a country (choropleth) → its most populous city. The university
+              // layer (curveNumber 2) is not a valid patient zero.
+              if (pt.curveNumber === 1 && typeof pt.pointNumber === "number") {
                 onPick(pt.pointNumber);
               } else if (pt.location) {
                 const idx = biggestCityIn(pt.location);

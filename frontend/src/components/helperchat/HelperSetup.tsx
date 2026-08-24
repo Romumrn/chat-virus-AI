@@ -4,7 +4,14 @@
  */
 import { useState } from "react";
 import { Play } from "lucide-react";
-import { STAT_BUDGET, statTotal, type VirusConfig, type VirusStats } from "./helperTypes";
+import {
+  STAT_BUDGET,
+  statTotal,
+  VECTORS,
+  type VectorId,
+  type VirusConfig,
+  type VirusStats,
+} from "./helperTypes";
 
 const STAT_META: { key: keyof VirusStats; label: string }[] = [
   { key: "contagiosite", label: "Contagiosité" },
@@ -17,6 +24,11 @@ const DEFAULT_STATS: VirusStats = { contagiosite: 0.5, letalite: 0.3, resistance
 export default function HelperSetup({ onLaunch }: { onLaunch: (cfg: VirusConfig) => void }) {
   const [name, setName] = useState("");
   const [stats, setStats] = useState<VirusStats>(DEFAULT_STATS);
+  const [vectors, setVectors] = useState<VectorId[]>(["respiratoire"]);
+
+  function toggleVector(id: VectorId) {
+    setVectors((v) => (v.includes(id) ? v.filter((x) => x !== id) : [...v, id]));
+  }
 
   function setStat(key: keyof VirusStats, value: number) {
     setStats((s) => {
@@ -97,10 +109,43 @@ export default function HelperSetup({ onLaunch }: { onLaunch: (cfg: VirusConfig)
           ))}
         </div>
 
+        {/* Transmission vectors */}
+        <div className="mt-6">
+          <div className="mb-2 text-sm font-medium text-neutral-200">Voies de transmission</div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {VECTORS.map((vec) => {
+              const on = vectors.includes(vec.id);
+              return (
+                <button
+                  key={vec.id}
+                  onClick={() => toggleVector(vec.id)}
+                  className={[
+                    "flex items-start gap-2 rounded-lg border p-2 text-left transition",
+                    on
+                      ? "border-red-500 bg-red-500/10"
+                      : "border-white/10 bg-white/5 hover:border-white/25",
+                  ].join(" ")}
+                >
+                  <span className="text-lg leading-none">{vec.emoji}</span>
+                  <span>
+                    <span className="block text-sm font-medium text-neutral-100">
+                      {vec.label}
+                      {on && <span className="ml-1 text-red-400">✓</span>}
+                    </span>
+                    <span className="block text-[11px] leading-snug text-neutral-500">
+                      {vec.desc}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Launch */}
         <div className="mt-8 flex justify-center">
           <button
-            onClick={() => onLaunch({ virusName, presetId: "custom", stats })}
+            onClick={() => onLaunch({ virusName, presetId: "custom", stats, vectors })}
             className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-6 py-3 font-semibold text-white shadow-lg shadow-red-900/40 transition hover:bg-red-500"
           >
             <Play className="h-5 w-5" />

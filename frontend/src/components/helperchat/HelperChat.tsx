@@ -15,7 +15,15 @@ import { X, Pause, Play, RotateCcw } from "lucide-react";
 import HelperMap from "./HelperMap";
 import HelperSetup from "./HelperSetup";
 import HelperVehicles, { type VehicleDot } from "./HelperVehicles";
-import { initSim, stepSim, metrics, type SimState, type Jump } from "./helperEngine";
+import {
+  initSim,
+  stepSim,
+  metrics,
+  toVectorSet,
+  type SimState,
+  type Jump,
+  type VectorSet,
+} from "./helperEngine";
 import { CITIES } from "./helperCities";
 import { COUNTRY_BY_ISO } from "./helperData";
 import type { VirusConfig } from "./helperTypes";
@@ -52,14 +60,23 @@ interface ScoreRow {
   score: number;
 }
 
+interface ScoreBreakdown {
+  coverage_pts: number;
+  mortality_pts: number;
+  speed_pts: number;
+  vaccine_penalty: boolean;
+  total: number;
+}
+
 interface ScoreOut {
   score: number;
+  breakdown: ScoreBreakdown;
   leaderboard: ScoreRow[];
 }
 
 type Phase = "setup" | "pick" | "running" | "end";
 
-const TICK_MS = 550; // simulated-day cadence — slow enough to watch spread
+const TICK_MS = 650; // simulated-day cadence — slow enough to watch spread
 const MAP_H = 480;
 const MAX_VEHICLES = 40; // cap so the overlay never clutters
 const AIR_DUR = 1500; // ms a plane spends crossing
@@ -138,6 +155,42 @@ function easeInOut(p: number): number {
   return p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
 }
 
+const D2R = Math.PI / 180;
+const R2D = 180 / Math.PI;
+
+/**
+ * Great-circle interpolation between two [lat,lng] points — the real path a
+ * plane or ship follows on the globe, drawn as a curve on the flat map. Uses
+ * spherical linear interpolation of the two points' unit vectors.
+ */
+function greatCircle(
+  from: [number, number],
+  to: [number, number],
+  f: number,
+): { lat: number; lng: number } {
+  const la1 = from[0] * D2R;
+  const lo1 = from[1] * D2R;
+  const la2 = to[0] * D2R;
+  const lo2 = to[1] * D2R;
+  const x1 = Math.cos(la1) * Math.cos(lo1);
+  const y1 = Math.cos(la1) * Math.sin(lo1);
+  const z1 = Math.sin(la1);
+  const x2 = Math.cos(la2) * Math.cos(lo2);
+  const y2 = Math.cos(la2) * Math.sin(lo2);
+  const z2 = Math.sin(la2);
+  let dot = x1 * x2 + y1 * y2 + z1 * z2;
+  dot = Math.max(-1, Math.min(1, dot));
+  const omega = Math.acos(dot);
+  if (omega < 1e-6) return { lat: from[0], lng: from[1] };
+  const s = Math.sin(omega);
+  const a = Math.sin((1 - f) * omega) / s;
+  const b = Math.sin(f * omega) / s;
+  const x = a * x1 + b * x2;
+  const y = a * y1 + b * y2;
+  const z = a * z1 + b * z2;
+  return { lat: Math.atan2(z, Math.hypot(x, y)) * R2D, lng: Math.atan2(y, x) * R2D };
+}
+
 function fmt(n: number): string {
   if (n >= 1e9) return (n / 1e9).toFixed(2) + " Md";
   if (n >= 1e6) return (n / 1e6).toFixed(1) + " M";
@@ -159,6 +212,7 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
 
   // End-of-game scoring.
   const [myScore, setMyScore] = useState<number | null>(null);
+  const [breakdown, setBreakdown] = useState<ScoreBreakdown | null>(null);
   const [leaderboard, setLeaderboard] = useState<ScoreRow[] | null>(null);
   const [scoreError, setScoreError] = useState(false);
   const submittedRef = useRef(false);
@@ -200,10 +254,11 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
   // Tick loop: advance the simulation while running and not paused.
   useEffect(() => {
     if (phase !== "running" || paused || !config) return;
+    const vecSet: VectorSet = toVectorSet(config.vectors);
     const id = setInterval(() => {
       const prev = simRef.current;
       if (!prev || prev.finished) return;
-      const next = stepSim(prev, config.stats);
+      const next = stepSim(prev, config.stats, vecSet);
       setSim(next);
       spawnVehicles(next.lastJumps);
 
@@ -212,10 +267,11 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
       const cInf = new Float64Array(COUNTRY_LIST.length);
       let people = 0;
       let deaths = 0;
-      for (let i = 0; i < next.inf.length; i++) {
+      for (let i = 0; i < next.S.length; i++) {
         const p = CITIES[i].pop;
-        cInf[CITY_COUNTRY[i]] += next.inf[i] * p;
-        people += next.inf[i] * p;
+        const ever = 1 - next.S[i]; // ever-infected fraction
+        cInf[CITY_COUNTRY[i]] += ever * p;
+        people += ever * p;
         deaths += next.dead[i] * p;
       }
 
@@ -237,11 +293,28 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
         }
       }
 
+      // Vaccine research milestones.
+      if (prev.vaccine < 0.001 && next.vaccine >= 0.001 && !milestonesRef.current.has("vac0")) {
+        milestonesRef.current.add("vac0");
+        fresh.push({ id: eventSeq++, text: "🔬 Les laboratoires lancent la course au vaccin" });
+      }
+      if (prev.vaccine < 0.5 && next.vaccine >= 0.5 && !milestonesRef.current.has("vac50")) {
+        milestonesRef.current.add("vac50");
+        fresh.push({ id: eventSeq++, text: "💉 Vaccin développé à 50 %" });
+      }
+      if (next.vaccine >= 1 && !milestonesRef.current.has("vac100")) {
+        milestonesRef.current.add("vac100");
+        fresh.push({ id: eventSeq++, text: "💉 Vaccin déployé — l'humanité contre-attaque !" });
+      }
+
       // Lyon easter egg.
-      if (LYON_IDX >= 0 && !lyonFiredRef.current && next.inf[LYON_IDX] >= LYON_TH) {
+      if (LYON_IDX >= 0 && !lyonFiredRef.current && 1 - next.S[LYON_IDX] >= LYON_TH) {
         lyonFiredRef.current = true;
         fresh.push({ id: eventSeq++, text: "🏢 Le Prabi est contaminé !" });
       }
+
+      // Gameplay event this tick (mutation, lockdown, super-spreader…).
+      if (next.lastEvent) fresh.push({ id: eventSeq++, text: next.lastEvent });
 
       // Occasional random flavour headline (never the same twice in a row).
       if (Math.random() < FLASH_CHANCE) {
@@ -284,11 +357,14 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
         virus: config.virusName,
         days: m.day,
         infected_pct: m.infectedPct,
+        deaths_pct: m.deathsPct,
         dead: Math.round(m.deaths),
-        won: m.infectedPct >= 0.95,
+        won: m.won,
+        vaccine_deployed: m.vaccineDeployed,
       })
       .then((res) => {
         setMyScore(res.score);
+        setBreakdown(res.breakdown);
         setLeaderboard(res.leaderboard);
       })
       .catch(() => setScoreError(true));
@@ -324,6 +400,7 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
     lastFlashRef.current = "";
     setPaused(false);
     setMyScore(null);
+    setBreakdown(null);
     setLeaderboard(null);
     setScoreError(false);
     submittedRef.current = false;
@@ -336,18 +413,18 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
     const now = performance.now();
     return vehicles.map((v) => {
       const e = easeInOut(Math.min(1, (now - v.start) / v.dur));
-      return {
-        lat: v.from[0] + (v.to[0] - v.from[0]) * e,
-        lng: v.from[1] + (v.to[1] - v.from[1]) * e,
-        mode: v.mode,
-      };
+      const p = greatCircle(v.from, v.to, e); // curved real-world trajectory
+      return { lat: p.lat, lng: p.lng, mode: v.mode };
     });
   })();
 
   const m = sim ? metrics(sim) : null;
   // New array only when the sim advances (per tick), so the memoized map does
   // not redraw on every animation frame — critical with ~10k dots.
-  const cityInf = useMemo(() => (sim ? Array.from(sim.inf) : ZERO_INF), [sim]);
+  const cityInf = useMemo(
+    () => (sim ? Array.from(sim.S, (s) => 1 - s) : ZERO_INF),
+    [sim],
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
@@ -373,15 +450,61 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
                 <div className="text-xs text-neutral-400">
                   {config?.virusName} — choisis ton patient zéro (une ville ou un pays)
                 </div>
+                <div className="mt-1 text-xs text-red-300/80">
+                  🎯 Objectif : contaminer 90% du monde avant que le vaccin soit déployé
+                </div>
               </div>
             ) : (
               m && (
-                <div className="mb-2 grid grid-cols-4 gap-2 text-center">
-                  <Stat label="Jour" value={String(m.day)} />
-                  <Stat label="Contaminés" value={fmt(m.infectedPeople)} accent />
-                  <Stat label="Villes" value={`${m.citiesTouched}/${m.totalCities}`} />
-                  <Stat label="Morts" value={fmt(m.deaths)} danger />
-                </div>
+                <>
+                  <div className="mb-2 grid grid-cols-5 gap-2 text-center">
+                    <Stat label="Jour" value={String(m.day)} />
+                    <Stat label="Contaminés" value={fmt(m.infectedPeople)} accent />
+                    <Stat label="Actifs" value={fmt(m.activePeople)} />
+                    <Stat label="Villes" value={`${m.citiesTouched}/${m.totalCities}`} />
+                    <Stat label="Morts" value={fmt(m.deaths)} danger />
+                  </div>
+                  {/* R0 / Rt (herd immunity pushes Rt down over time) */}
+                  <div className="mb-2 text-center text-[11px] text-neutral-400">
+                    R₀ <span className="font-mono text-neutral-200">{m.r0.toFixed(2)}</span>
+                    {"  ·  "}
+                    Rt{" "}
+                    <span
+                      className={
+                        "font-mono " + (m.rt >= 1 ? "text-red-400" : "text-emerald-400")
+                      }
+                    >
+                      {m.rt.toFixed(2)}
+                    </span>
+                    <span className="text-neutral-600">
+                      {" "}
+                      {m.rt >= 1 ? "(épidémie en expansion)" : "(reflux — immunité/vaccin)"}
+                    </span>
+                  </div>
+                  {/* Vaccine research race — only shown once research has begun
+                      (i.e. the pathogen has been identified). */}
+                  {m.vaccine > 0 && (
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="w-16 text-[11px] uppercase tracking-wide text-cyan-300/80">
+                        Vaccin
+                      </span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-neutral-800">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-sky-300 transition-all"
+                          style={{ width: `${Math.round(m.vaccine * 100)}%` }}
+                        />
+                      </div>
+                      <span className="w-10 text-right font-mono text-xs text-cyan-300">
+                        {Math.round(m.vaccine * 100)}%
+                      </span>
+                    </div>
+                  )}
+                  {m.closedCountries > 0 && (
+                    <div className="mb-2 text-center text-[11px] text-amber-300/80">
+                      🛂 {m.closedCountries} pays ont fermé leurs frontières
+                    </div>
+                  )}
+                </>
               )
             )}
 
@@ -413,17 +536,35 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
                     >
                       <X className="h-4 w-4" />
                     </button>
-                    <div className="text-3xl font-bold text-red-400">Pandémie terminée</div>
+                    {m?.won ? (
+                      <div className="text-4xl font-extrabold tracking-wide text-red-500">
+                        VICTOIRE 🦠
+                      </div>
+                    ) : (
+                      <div className="text-4xl font-extrabold tracking-wide text-cyan-300">
+                        DÉFAITE
+                      </div>
+                    )}
+                    <div className="mt-1 text-sm font-medium text-neutral-200">
+                      {m?.endReason === "infected" &&
+                        `${config?.virusName} a submergé le monde : plus de ${Math.round(
+                          (m?.infectedPct ?? 0) * 100,
+                        )}% contaminés.`}
+                      {m?.endReason === "vaccine" &&
+                        "💉 Vaccin déployé — l'humanité est sauvée."}
+                      {m?.endReason === "stall" &&
+                        "🛡️ Le virus s'est éteint : l'immunité collective l'a stoppé."}
+                      {m?.endReason === "timeout" && "⏳ Temps écoulé — le monde a tenu."}
+                    </div>
                     <div className="mt-2 text-sm text-neutral-300">
-                      {config?.virusName} a contaminé{" "}
+                      <span className="font-semibold text-white">{config?.virusName}</span> a
+                      contaminé{" "}
                       <span className="font-semibold text-white">
                         {m ? Math.round(m.infectedPct * 100) : 0}%
                       </span>{" "}
                       du monde en{" "}
-                      <span className="font-semibold text-white">{m?.day}</span> jours.
-                    </div>
-                    <div className="mt-1 text-sm text-neutral-400">
-                      {m ? fmt(m.deaths) : 0} morts.
+                      <span className="font-semibold text-white">{m?.day}</span> jours ·{" "}
+                      <span className="font-semibold text-white">{m ? fmt(m.deaths) : 0}</span> morts.
                     </div>
 
                     {/* Score + global top 5 */}
@@ -431,9 +572,41 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
                       {myScore !== null && (
                         <div className="text-sm text-neutral-300">
                           Ton score :{" "}
-                          <span className="font-mono text-xl font-bold text-amber-400">
+                          <span className="font-mono text-2xl font-bold text-amber-400">
                             {myScore}
                           </span>
+                        </div>
+                      )}
+                      {breakdown && m && (
+                        <div className="mx-auto mt-2 max-w-xs rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-left text-xs text-neutral-400">
+                          <div className="mb-1 text-center font-medium text-neutral-300">
+                            Comment est calculé ton score
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Couverture ({Math.round(m.infectedPct * 100)}%)</span>
+                            <span className="text-neutral-200">+{breakdown.coverage_pts}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Mortalité ({Math.round(m.deathsPct * 100)}%)</span>
+                            <span className="text-neutral-200">+{breakdown.mortality_pts}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Rapidité ({m.day} j)</span>
+                            <span className="text-neutral-200">+{breakdown.speed_pts}</span>
+                          </div>
+                          {breakdown.vaccine_penalty && (
+                            <div className="flex justify-between text-cyan-300">
+                              <span>Malus vaccin</span>
+                              <span>× 0.4</span>
+                            </div>
+                          )}
+                          <div className="mt-1 border-t border-white/10 pt-1 text-center text-neutral-300">
+                            Total ={" "}
+                            <span className="font-mono font-semibold text-amber-400">{myScore}</span>
+                          </div>
+                          <div className="mt-1 text-center text-[11px] text-neutral-500">
+                            Contamine large, tue beaucoup <em>et</em> vite — avant le vaccin.
+                          </div>
                         </div>
                       )}
                       {scoreError && (
@@ -491,12 +664,12 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
                 ) : (
                   <div
                     className="whitespace-nowrap py-1.5 text-sm font-medium text-red-300"
-                    style={{ animation: "helperMarquee 40s linear infinite" }}
+                    style={{ animation: "helperMarquee 65s linear infinite" }}
                   >
                     {[0, 1].map((dup) => (
                       <span key={dup}>
-                        {feed.map((e) => (
-                          <span key={`${dup}-${e.id}`} className="mx-6">
+                        {feed.map((e, i) => (
+                          <span key={`${dup}-${i}`} className="mx-6">
                             {e.text}
                           </span>
                         ))}

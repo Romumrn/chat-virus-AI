@@ -18,8 +18,10 @@ class ScoreIn(BaseModel):
     virus: str = Field(default="", max_length=40)
     days: int = Field(ge=0, le=100000)
     infected_pct: float = Field(ge=0, le=1)
+    deaths_pct: float = Field(default=0.0, ge=0, le=1)
     dead: int = Field(ge=0)
     won: bool = False
+    vaccine_deployed: bool = False
 
 
 class ScoreRow(BaseModel):
@@ -31,16 +33,40 @@ class ScoreRow(BaseModel):
     score: int
 
 
+class ScoreBreakdown(BaseModel):
+    coverage_pts: int
+    mortality_pts: int
+    speed_pts: int
+    vaccine_penalty: bool
+    total: int
+
+
 class ScoreOut(BaseModel):
     score: int
+    breakdown: ScoreBreakdown
     leaderboard: list[ScoreRow]
 
 
-def _compute_score(days: int, infected_pct: float) -> int:
-    """Reward covering the world both widely and fast: coverage scaled up by a
-    speed bonus that decays with the number of days taken."""
-    speed_bonus = max(0, 600 - days) * 2
-    return round(infected_pct * (1000 + speed_bonus))
+# Score weights (kept here so the end-screen breakdown mirrors them exactly).
+COVERAGE_MAX = 1000  # points for infecting 100% of the world
+MORTALITY_MAX = 3000  # points for killing 100% — mortality is worth the most
+SPEED_MAX = 600  # points for an instant pandemic (1 pt per day saved, cap 600d)
+VACCINE_MULT = 0.4  # score kept if the vaccine was deployed (a setback)
+
+
+def _score_breakdown(body: "ScoreIn") -> ScoreBreakdown:
+    coverage_pts = round(body.infected_pct * COVERAGE_MAX)
+    mortality_pts = round(body.deaths_pct * MORTALITY_MAX)
+    speed_pts = max(0, SPEED_MAX - body.days)
+    subtotal = coverage_pts + mortality_pts + speed_pts
+    total = round(subtotal * VACCINE_MULT) if body.vaccine_deployed else subtotal
+    return ScoreBreakdown(
+        coverage_pts=coverage_pts,
+        mortality_pts=mortality_pts,
+        speed_pts=speed_pts,
+        vaccine_penalty=body.vaccine_deployed,
+        total=total,
+    )
 
 
 def _player_name(row) -> str:
@@ -69,7 +95,7 @@ def _leaderboard(conn, limit: int = 5) -> list[ScoreRow]:
 @router.post("/score", response_model=ScoreOut)
 def submit_score(body: ScoreIn, user: dict = Depends(auth.get_current_user)):
     conn = db.get_conn()
-    score = _compute_score(body.days, body.infected_pct)
+    breakdown = _score_breakdown(body)
     db.add_helper_score(
         conn,
         user_email=user["email"],
@@ -78,9 +104,9 @@ def submit_score(body: ScoreIn, user: dict = Depends(auth.get_current_user)):
         infected_pct=body.infected_pct,
         dead=body.dead,
         won=body.won,
-        score=score,
+        score=breakdown.total,
     )
-    return ScoreOut(score=score, leaderboard=_leaderboard(conn))
+    return ScoreOut(score=breakdown.total, breakdown=breakdown, leaderboard=_leaderboard(conn))
 
 
 @router.get("/leaderboard", response_model=list[ScoreRow])
