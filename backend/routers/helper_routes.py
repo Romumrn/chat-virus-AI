@@ -48,9 +48,10 @@ class ScoreOut(BaseModel):
 
 
 # Score weights (kept here so the end-screen breakdown mirrors them exactly).
-COVERAGE_MAX = 1000  # points for infecting 100% of the world
-MORTALITY_MAX = 3000  # points for killing 100% — mortality is worth the most
-SPEED_MAX = 600  # points for an instant pandemic (1 pt per day saved, cap 600d)
+# Mortality is the goal: it dwarfs coverage and speed.
+COVERAGE_MAX = 500  # points for infecting 100% of the world (secondary)
+MORTALITY_MAX = 8000  # points for killing 100% of the world (dominant)
+SPEED_MAX = 400  # points for an instant pandemic (1 pt per day saved, cap 400d)
 VACCINE_MULT = 0.4  # score kept if the vaccine was deployed (a setback)
 
 

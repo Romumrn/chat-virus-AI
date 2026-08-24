@@ -41,11 +41,17 @@ const UNI_TEXT = UNIVERSITIES.map((u) => u.short);
 
 function HelperMap({
   cityInf,
+  infPeople,
+  deaths,
   height = 480,
   onPick,
 }: {
-  /** per-city infection level [0,1], aligned with CITIES. */
+  /** per-city infection level [0,1], aligned with CITIES (used for colour). */
   cityInf: number[];
+  /** per-city cumulative infected people (for the tooltip). */
+  infPeople: number[];
+  /** per-city cumulative deaths (for the tooltip). */
+  deaths: number[];
   height?: number;
   /** Called with a CITIES index when a country or a city dot is clicked. */
   onPick?: (cityIndex: number) => void;
@@ -74,7 +80,7 @@ function HelperMap({
           lat: CITY_LAT,
           lon: CITY_LON,
           text: CITY_TEXT,
-          customdata: cityInf.map((v, i) => [v, CITY_BIOME[i]]),
+          customdata: cityInf.map((_v, i) => [CITY_BIOME[i], infPeople[i], deaths[i]]),
           marker: {
             size: CITY_SIZE,
             color: cityInf,
@@ -85,7 +91,9 @@ function HelperMap({
             line: { width: 0 },
           },
           hovertemplate:
-            "%{text}<br>Biome : %{customdata[1]}<br>Contamination : %{customdata[0]:.0%}<extra></extra>",
+            "<b>%{text}</b><br>Biome : %{customdata[0]}" +
+            "<br>Contaminés : %{customdata[1]:.3s}" +
+            "<br>Morts : %{customdata[2]:.3s}<extra></extra>",
         } as any,
         {
           type: "scattergeo",

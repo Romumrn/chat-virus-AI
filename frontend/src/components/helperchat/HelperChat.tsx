@@ -425,6 +425,15 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
     () => (sim ? Array.from(sim.S, (s) => 1 - s) : ZERO_INF),
     [sim],
   );
+  // Per-city cumulative infected people & deaths, for the hover tooltip.
+  const cityInfPeople = useMemo(
+    () => (sim ? Array.from(sim.S, (s, i) => (1 - s) * CITIES[i].pop) : ZERO_INF),
+    [sim],
+  );
+  const cityDeaths = useMemo(
+    () => (sim ? Array.from(sim.dead, (d, i) => d * CITIES[i].pop) : ZERO_INF),
+    [sim],
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
@@ -451,7 +460,8 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
                   {config?.virusName} — choisis ton patient zéro (une ville ou un pays)
                 </div>
                 <div className="mt-1 text-xs text-red-300/80">
-                  🎯 Objectif : contaminer 90% du monde avant que le vaccin soit déployé
+                  🎯 But : faire le <span className="font-semibold">maximum de morts</span>. (La
+                  partie s'arrête à 90% de contaminés, ou si le vaccin est déployé.)
                 </div>
               </div>
             ) : (
@@ -466,9 +476,14 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
                   </div>
                   {/* R0 / Rt (herd immunity pushes Rt down over time) */}
                   <div className="mb-2 text-center text-[11px] text-neutral-400">
-                    R₀ <span className="font-mono text-neutral-200">{m.r0.toFixed(2)}</span>
+                    <InfoTip text="R₀ (« R zéro ») : nombre moyen de personnes qu'un malade contamine dans une population entièrement susceptible. Fixé par ton virus. Au-dessus de 1, l'épidémie peut décoller.">
+                      R₀
+                    </InfoTip>{" "}
+                    <span className="font-mono text-neutral-200">{m.r0.toFixed(2)}</span>
                     {"  ·  "}
-                    Rt{" "}
+                    <InfoTip text="Rt : nombre effectif de contaminations par malade à l'instant t. Rt = R₀ × part de gens encore susceptibles. Il baisse quand les gens deviennent immunisés ou vaccinés. Sous 1, l'épidémie reflue.">
+                      Rt
+                    </InfoTip>{" "}
                     <span
                       className={
                         "font-mono " + (m.rt >= 1 ? "text-red-400" : "text-emerald-400")
@@ -512,6 +527,8 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
             <div className="relative flex-1 overflow-hidden rounded-xl border border-white/5 bg-black/30">
               <HelperMap
                 cityInf={cityInf}
+                infPeople={cityInfPeople}
+                deaths={cityDeaths}
                 height={MAP_H}
                 onPick={phase === "pick" ? pickPatientZero : undefined}
               />
@@ -605,7 +622,8 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
                             <span className="font-mono font-semibold text-amber-400">{myScore}</span>
                           </div>
                           <div className="mt-1 text-center text-[11px] text-neutral-500">
-                            Contamine large, tue beaucoup <em>et</em> vite — avant le vaccin.
+                            La <em>mortalité</em> rapporte le plus — tue un maximum, vite, avant le
+                            vaccin.
                           </div>
                         </div>
                       )}
@@ -697,6 +715,18 @@ export default function HelperChat({ onClose }: { onClose: () => void }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** A term with a hover bubble explaining it. */
+function InfoTip({ children, text }: { children: React.ReactNode; text: string }) {
+  return (
+    <span className="group relative cursor-help underline decoration-dotted underline-offset-2">
+      {children}
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1 hidden w-56 -translate-x-1/2 rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-left text-[11px] font-normal leading-snug normal-case text-neutral-200 shadow-xl group-hover:block">
+        {text}
+      </span>
+    </span>
   );
 }
 
