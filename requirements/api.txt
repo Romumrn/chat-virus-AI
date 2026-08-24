@@ -1,6 +1,10 @@
 # Dependencies for the FastAPI backend (backend/) — used by docker/Dockerfile.api.
-# Reuses the shared base (fastmcp, plotly, requests) and adds the web stack.
--r base.txt
+# The MCP data server now lives in its own repo (viromeatlas_mcp); this app only
+# talks to it over HTTP via fastmcp.Client, so it keeps fastmcp but no longer
+# needs the MCP server's data stack (duckdb/pandas/numpy).
+fastmcp>=3.4
+plotly>=6.0
+requests>=2.32
 fastapi>=0.115
 uvicorn[standard]>=0.30
 PyJWT>=2.8

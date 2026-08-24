@@ -1,4 +1,0 @@
-# Shared by both processes (the backend/ app and server_mcp.py) — see api.txt / mcp.txt.
-fastmcp>=3.4
-plotly>=6.0
-requests>=2.32

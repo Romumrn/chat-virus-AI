@@ -44,11 +44,12 @@ over **Server-Sent Events** (status → tool calls → figures → sources → f
                              tool specs│ final answer
                                       ▼
 ┌──────────────────┐   REST + SSE   ┌─────────────────────┐   HTTP   ┌───────────────────────────┐
-│  React front     │ ─────────────► │   FastAPI backend   │ ───────► │   server_mcp.py           │
-│  (Vite + TS +    │ ◄───────────── │   (backend/)        │ ◄─────── │   FastMCP server          │
-│   Tailwind)      │   JWT auth     │   agent loop, auth, │  tools + │   (owns all data access:  │
-│  :5173 (dev)     │                │   roles, SSE  :8080 │ resources│   taxonomy CSV + S3 host  │
-└──────────────────┘                └─────────────────────┘          │   Parquet via DuckDB)     │
+│  React front     │ ─────────────► │   FastAPI backend   │ ───────► │   MCP server              │
+│  (Vite + TS +    │ ◄───────────── │   (backend/)        │ ◄─────── │   (separate repo:         │
+│   Tailwind)      │   JWT auth     │   agent loop, auth, │  tools + │    viromeatlas_mcp)       │
+│  :5173 (dev)     │                │   roles, SSE  :8080 │ resources│   FastMCP — taxonomy CSV  │
+└──────────────────┘                └─────────────────────┘          │   + S3 host via DuckDB     │
+                                       MCP_SERVER_URL ───────────────►│   :8000                   │
                                                                      └───────────────────────────┘
 ```
 
@@ -63,11 +64,14 @@ over **Server-Sent Events** (status → tool calls → figures → sources → f
   it reads each tool's JSON schema to decide which configured defaults apply, rather than
   hardcoding tool names. It reuses the repo-root modules unchanged: `db.py` (SQLite),
   `config.py`, `prompt.py`, `logging_utils.py`.
-* **`server_mcp.py`** — owns the datasets, the DuckDB/S3 connection, and every tool's business
-  logic and guardrails. See [README_MCP.md](README_MCP.md). It never talks to Albert directly.
+* **MCP server** — owns the datasets, the DuckDB/S3 connection, and every tool's business
+  logic and guardrails. It now lives in its **own repository**
+  ([`viromeatlas_mcp`](../viromeatlas_mcp)); this app only reaches it over HTTP via
+  `MCP_SERVER_URL`. It never talks to Albert directly.
 
-The backend and the MCP server read their own separate secrets file — see
-[Configuration](#configuration). Albert needs only the API key in `.env.app`.
+The backend and the MCP server each read their own separate secrets file — the backend's is
+`.env.app` (see [Configuration](#configuration)); the MCP server's `.env` lives in its own repo.
+Albert needs only the API key in `.env.app`.
 
 
 ## Features
@@ -182,17 +186,16 @@ client code change.
 * Python 3.10+
 * Node.js 18+ (for the React front-end)
 * An **Albert API key** ([albert.api.etalab.gouv.fr](https://albert.api.etalab.gouv.fr))
-* Read access to the S3-compatible bucket hosting the virus–host Parquet dataset
+* A running **MCP server** (separate repo: [`viromeatlas_mcp`](../viromeatlas_mcp)), reachable at
+  `MCP_SERVER_URL` — it owns the S3 dataset access
 
-Python dependencies are split per process under [`requirements/`](requirements/): `api.txt` for the
-FastAPI backend, `mcp.txt` for `server_mcp.py`, both pulling shared packages from `base.txt`.
-`all.txt` combines everything for local dev on one host; `dev.txt` adds `pytest` for the
-[test suite](#testing).
+Python dependencies live under [`requirements/`](requirements/): `api.txt` is the self-contained
+FastAPI backend list; `dev.txt` adds `pytest` for the [test suite](#testing). (The MCP server's
+dependencies live in its own repo.)
 
 ### Configuration
 
-Secrets are split into **two separate `.env` files** — never shared, never imported by the other
-process:
+This app has a single secrets file. The MCP server's S3 credentials live in *its* repo, not here.
 
 * **`.env.app`** — read by the backend (copy from [`.env.app.example`](.env.app.example)):
 
@@ -210,30 +213,19 @@ process:
   User accounts need no further configuration — the SQLite database
   (`auth_data/viromechat.db`) is created automatically on first run.
 
-* **`.env.mcp`** — read by `server_mcp.py` (copy from [`.env.mcp.example`](.env.mcp.example)):
+  Point the backend at the MCP server with `MCP_SERVER_URL` (env var; default
+  `http://localhost:8000/mcp`). The S3 credentials themselves are configured in the MCP repo.
 
-  ```bash
-  ENDPOINT=your-s3-endpoint
-  ACCESS_KEY=...
-  SECRET_KEY=...
-  BUCKET=...
-  VIRAL_HOST_DATASET=your_dataset.parquet
-
-  # Optional, default shown:
-  # REGION=fr
-  # S3_URL_STYLE=path
-  ```
-
-Both files are gitignored. Non-secret configuration (model defaults, sampling parameters, timeouts,
-the MCP server URL, …) lives in `config.py`, shared by all processes.
+`.env.app` is gitignored. Non-secret configuration (model defaults, sampling parameters, timeouts,
+the MCP server URL, …) lives in `config.py`.
 
 ### Running (development)
 
-Three terminals from the repo root:
+Three terminals:
 
 ```bash
-# 1. MCP data server (loads the taxonomy CSV, connects to S3 — needs .env.mcp)
-python3 server_mcp.py
+# 1. MCP data server — from its OWN repo (viromeatlas_mcp); see that repo's README
+cd ../viromeatlas_mcp && python3 server_mcp.py
 
 # 2. FastAPI backend (needs .env.app) — interactive docs at http://localhost:8080/docs
 pip install -r requirements/api.txt
@@ -250,19 +242,20 @@ If the backend runs on a non-default port, start Vite with
 
 ### Running with Docker
 
-Two containers (`mcp` + `api`); the API also serves the built React SPA, so it is a single origin
-with no CORS. Set a real `JWT_SECRET` in `.env.app` first.
+This repo's compose starts a single `api` container (FastAPI + built React SPA — one origin, no
+CORS). The MCP server runs separately (its own repo / deployment); point `MCP_SERVER_URL` at it.
+Set a real `JWT_SECRET` in `.env.app` first.
 
 ```bash
-docker compose up --build            # mcp + api → http://localhost:8080
+# MCP_SERVER_URL defaults to http://host.docker.internal:8000/mcp (an MCP on the host)
+docker compose up --build            # api → http://localhost:8080
 ```
 
-* **`docker/Dockerfile.mcp`** → `mcp` service (`server_mcp.py`, port 8000)
-* **`docker/Dockerfile.api`** → `api` service (FastAPI + built SPA, port 8080) — waits for `mcp`'s
-  healthcheck before starting, then reaches it at `http://mcp:8000/mcp` (`MCP_SERVER_URL`)
+* **`docker/Dockerfile.api`** → `api` service (FastAPI + built SPA, port 8080), reaching the MCP
+  server at `MCP_SERVER_URL`
 
-Secrets are excluded from the images by `.dockerignore` — each service loads only its own
-`.env.app` / `.env.mcp` at runtime. The SQLite database lives in a **host bind-mount**
+Secrets are excluded from the image by `.dockerignore` — the backend loads only its own `.env.app`
+at runtime. The SQLite database lives in a **host bind-mount**
 (`./auth_data/viromechat.db`), readable/backup-able from the host. Because a bind-mount keeps the
 host directory's ownership — which may not match the container's non-root `app` user (uid 1000) —
 the API container starts from an entrypoint (`docker/entrypoint-api.sh`) that briefly runs as root
@@ -276,7 +269,7 @@ validation, table/figure formatting, auth/password rules, …) — see `tests/`.
 every push and pull request to `main` (see `.github/workflows/ci.yml`).
 
 ```bash
-pip install -r requirements/all.txt -r requirements/dev.txt
+pip install -r requirements/api.txt -r requirements/dev.txt
 pytest
 ```
 

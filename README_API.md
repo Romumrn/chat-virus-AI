@@ -1,12 +1,13 @@
 # Viromech@t — React front-end + FastAPI backend
 
-Three moving parts:
+Two moving parts in this repo, plus the MCP data server which now lives in its
+own repo ([`viromeatlas_mcp`](../viromeatlas_mcp)) and is reached over HTTP:
 
 | Component | Path | Port | Role |
 |-----------|------|------|------|
-| **MCP server** | `server_mcp.py` | 8000 | Data & tools |
 | **API** | `backend/` (FastAPI) | 8080 | REST + SSE, auth (JWT), roles |
 | **Front** | `frontend/` (React + Vite + TS) | 5173 (dev) | Chat, Account, Admin, Dev UI |
+| **MCP server** | *separate repo* `viromeatlas_mcp` | 8000 | Data & tools (via `MCP_SERVER_URL`) |
 
 The API reuses the root modules `db.py` (SQLite persistence), `config.py`,
 `prompt.py`, `logging_utils.py`. The agent loop lives in `backend/agent.py` and
@@ -28,11 +29,12 @@ stored as bcrypt hashes and verified on login.
 
 ## Run in development
 
-Three terminals from the repo root.
+Three terminals.
 
-1. MCP data server (needs `.env.mcp` for S3 credentials):
+1. MCP data server — from its own repo (`viromeatlas_mcp`), needs its `.env`
+for S3 credentials. See that repo's README:
 ```bash
-python3 server_mcp.py
+cd ../viromeatlas_mcp && python3 server_mcp.py
 ```
 
 2. FastAPI backend (needs `.env.app` — `ALBERT_API_KEY`, `JWT_SECRET`, optional
@@ -54,10 +56,12 @@ Open http://localhost:5173. If the backend runs on a non-default port, set
 
 ## Run with Docker
 
-Two containers (mcp + api); the API also serves the built React SPA, so it is a
-single origin with no CORS. Set a real `JWT_SECRET` in `.env.app` first.
+This repo's compose starts only the **api** container (which also serves the
+built React SPA — single origin, no CORS). Run the MCP server separately (its
+own repo) and point `MCP_SERVER_URL` at it; the default assumes it runs on the
+host at `:8000`. Set a real `JWT_SECRET` in `.env.app` first.
 ```bash
-docker compose up --build          # starts mcp + api → http://localhost:8080
+docker compose up --build          # starts api → http://localhost:8080
 ```
 The SQLite database (`auth_data/viromechat.db`) lives in a host bind-mount, so
 it survives rebuilds and is backup-able from the host.

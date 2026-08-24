@@ -1,12 +1,13 @@
 """
 config.py — Centralized configuration for the Virus Dataset AI Agent.
-Import in any module with: from config import *  or  from config import TAXO_DB_PATH, ...
+Import in any module with: from config import *  or  from config import MCP_SERVER_URL, ...
 
-Secrets/credentials are NOT stored here — they live in two separate,
-gitignored .env files, one per process:
+Secrets/credentials are NOT stored here — the app's live in a single,
+gitignored .env file:
   - .env.app  (loaded by backend/main.py) → ALBERT_API_KEY, JWT_SECRET, ...
-  - .env.mcp  (loaded by server_mcp.py)   → S3 credentials (ENDPOINT, ACCESS_KEY, ...)
-See .env.app.example / .env.mcp.example for the expected keys.
+See .env.app.example for the expected keys. The MCP data server is a separate
+service (its own repo, viromeatlas_mcp) with its own .env and S3 credentials;
+this app reaches it over HTTP via MCP_SERVER_URL below.
 
 A user account is required to use the app — there is no guest mode. Accounts
 live in the SQLite database (DB_PATH), managed by the FastAPI backend
@@ -16,11 +17,9 @@ live in the SQLite database (DB_PATH), managed by the FastAPI backend
 import os
 
 # ==================== PATHS ==================== #
-TAXO_DB_PATH = "data/TAXONOMY.csv"
 LOG_DIR      = "logs"
 
 APP_ENV_PATH = ".env.app"
-MCP_ENV_PATH = ".env.mcp"
 
 # Single SQLite database holding users (email, bcrypt hash, role), their
 # conversations and messages, plus a little app_meta (schema version, etc.).
@@ -83,10 +82,11 @@ ALBERT_MAX_RETRIES       = 5
 ALBERT_RETRY_BACKOFF_CAP = 30
 
 # ==================== MCP ==================== #
-# Overridable via env var: the backend and server_mcp.py run in separate Docker
-# containers (see docker-compose.yml), where "localhost" no longer points to the
-# other container — compose sets this to http://mcp:8000/mcp there. Local,
-# non-Docker dev (both processes on the same host) keeps the default.
+# URL of the external MCP data server (separate repo: viromeatlas_mcp). The
+# default assumes it runs on the same host on :8000; override via env var for a
+# containerized or remote deployment. In Docker, docker-compose.yml sets this to
+# http://host.docker.internal:8000/mcp so the api container can reach an MCP
+# running on the host.
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8000/mcp")
 
 # ==================== AGENT DEFAULTS ==================== #

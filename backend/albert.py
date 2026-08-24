@@ -294,7 +294,10 @@ def ui_search_keyword(call_args: dict) -> str:
     return ""
 
 
-# UI labels for tool status display — kept in sync with server_mcp.py tools.
+# UI labels for tool status display — kept in sync with the tool names exposed
+# by the external MCP server (separate repo: viromeatlas_mcp). Purely cosmetic:
+# the agent discovers tools dynamically via list_tools(), so a missing label
+# only means a less friendly status string, never a broken call.
 TOOL_LABELS = {
     "wikipedia_search":     ("📖", "Wikipedia search"),
     "pubmed_search":        ("🔬", "PubMed search"),

@@ -1,55 +1,28 @@
 services:
-  mcp:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.mcp
-    container_name: virus-mcp-server
-    env_file:
-      - .env.mcp
-    volumes:
-      - ./data:/app/data:ro
-    ports:
-      - "8000:8000"
-    restart: unless-stopped
-    healthcheck:
-      # No curl in the slim image — a plain Python request is enough to know
-      # the MCP server is up. Gates the "app" service's startup below.
-      #
-      # The MCP server replies 406 to a bare GET on /mcp (it expects proper
-      # MCP-protocol headers, which a healthcheck has no business sending) —
-      # urlopen() raises HTTPError on any 4xx/5xx, so that has to be treated
-      # as "server is up and answering HTTP", not as a failure. Only a
-      # connection-level error (nothing listening yet) should fail the check.
-      test:
-        - "CMD"
-        - "python"
-        - "-c"
-        - |
-          import sys, urllib.error, urllib.request
-          try:
-              urllib.request.urlopen("http://localhost:8000/mcp", timeout=3)
-          except urllib.error.HTTPError:
-              pass
-          except Exception:
-              sys.exit(1)
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 15s
-
   # FastAPI backend + built React SPA (one origin). This is the app front-end;
   # the SQLite DB lives in ./auth_data (host bind-mount, persistent).
+  #
+  # The MCP data server is a SEPARATE service, in its own repo (viromeatlas_mcp).
+  # It is not started here — run it independently (its own docker-compose, or a
+  # deployed instance) and point MCP_SERVER_URL at it.
   api:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
     container_name: virus-api
     environment:
-      # Reach the MCP server by its Compose network name, not localhost.
-      - MCP_SERVER_URL=http://mcp:8000/mcp
+      # URL of the external MCP server. Default assumes an MCP running on the
+      # host (e.g. the viromeatlas_mcp compose on :8000); override for a
+      # deployed instance. host.docker.internal resolves to the host from
+      # inside the container.
+      - MCP_SERVER_URL=${MCP_SERVER_URL:-http://host.docker.internal:8000/mcp}
       # Serve the SPA from the same origin, so CORS is inert; override if the
       # front is ever hosted separately.
       - CORS_ORIGINS=
+    extra_hosts:
+      # Make host.docker.internal work on Linux hosts too (it's automatic on
+      # Docker Desktop / macOS).
+      - "host.docker.internal:host-gateway"
     env_file:
       # ALBERT_API_KEY, JWT_SECRET, ADMIN_EMAILS, REGISTRATION_CODE.
       # JWT_SECRET MUST be a long random value in production — see .env.app.example.
@@ -62,7 +35,4 @@ services:
       - ./auth_data:/app/auth_data
     ports:
       - "8080:8080"
-    depends_on:
-      mcp:
-        condition: service_healthy
     restart: unless-stopped

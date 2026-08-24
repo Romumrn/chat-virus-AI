@@ -1,5 +1,6 @@
 # FastAPI backend (backend/) + the built React SPA (frontend/) served from the
-# same origin. Talks to Albert API and to server_mcp.py over MCP/HTTP.
+# same origin. Talks to the Albert API and to the external MCP server (separate
+# repo, viromeatlas_mcp) over MCP/HTTP via MCP_SERVER_URL.
 # Build from the repo root: docker build -f docker/Dockerfile.api .
 
 # ── Stage 1: build the React front-end ──────────────────────────────────────
@@ -21,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gosu \
 COPY requirements/ requirements/
 RUN pip install --no-cache-dir -r requirements/api.txt
 
-# Non-root user with a writable HOME (see Dockerfile.mcp for the rationale).
+# Non-root user with a writable HOME for security.
 RUN addgroup --gid 1000 app \
     && adduser --uid 1000 --gid 1000 --system --home /home/app --shell /usr/sbin/nologin app \
     && mkdir -p /home/app && chown app:app /home/app
