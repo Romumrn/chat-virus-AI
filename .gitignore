@@ -22,6 +22,13 @@ frontend/dist/
 # by the host user before first run) but never commit the database file.
 auth_data/*
 !auth_data/.gitkeep
+# Belt-and-suspenders: SQLite files and stray auth_data/logs dirs created if the
+# backend is ever launched from a non-root cwd (e.g. frontend/).
+*.db
+*.db-shm
+*.db-wal
+**/auth_data/
+**/logs/
 test_neo4j.ipynb
 test_S3MCP.ipynb
 .gitignore
